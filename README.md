@@ -64,7 +64,7 @@ App 裡面有一個內建瀏覽器，會打開 Uber Eats 網頁版，並自動�
 ### 下載與安裝
 
 1. **登入 GitHub**：用手機瀏覽器登入 GitHub。repo 是私人的，沒登入就下載不到。
-2. **下載 APK**：打開 [Releases 的 apk-latest](https://github.com/gleam542/ubereat_auto_fill/releases/tag/apk-latest)，下載 `ubereats-promo-autofill.apk`（[直接下載連結](https://github.com/gleam542/ubereat_auto_fill/releases/download/apk-latest/ubereats-promo-autofill.apk)）。
+2. **下載 APK**：打開 [Releases 的 apk-latest](https://github.com/gleam542/ubereat_auto_fill/releases/tag/apk-latest)，下載 `ubereat_auto_fill.apk`（[直接下載連結](https://github.com/gleam542/ubereat_auto_fill/releases/download/apk-latest/ubereat_auto_fill.apk)）。
 3. **安裝**：打開下載好的檔案。
    - 手機若詢問是否「允許安裝不明應用程式」，請允許瀏覽器安裝。
    - 若 Play 安全防護跳出警告，點「更多詳細資料」→「仍要安裝」。這是因為 App 不是從 Play 商店下載的。
@@ -73,7 +73,7 @@ APK 由 GitHub Actions 自動產生：每次推送腳本或 `android/` 底下的
 
 ### 使用
 
-1. **打開 App 並登入**：打開「優惠碼自動填入」，會直接進入 Uber Eats 網頁版，登入你的帳號。
+1. **打開 App 並登入**：打開桌面上的「UberEat 優惠碼」，會直接進入 Uber Eats 網頁版，登入你的帳號。
    - 建議用手機號碼或 Email 登入。
    - 「用 Google 登入」在 App 內建瀏覽器裡可能會被 Google 擋下。
 2. **開始填入**：用法跟電腦版一樣，按「① 抓取優惠碼」，再按「② 開始填入」。
