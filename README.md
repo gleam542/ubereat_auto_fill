@@ -55,9 +55,68 @@ Uber Eats 改版後，自動偵測可能會失效。這時打開 **手動新增 
 
 腳本會記住你指定的位置。
 
-## 在 Android 手機上使用
+## Android App（APK）
 
-Android 版 Chrome 不能裝擴充功能，請改用 **Firefox**。手機版 Firefox 可以裝 Tampermonkey；找不到的話，Violentmonkey 也可以。
+Android 手機最簡單的用法是直接裝 App，不需要 Firefox 或 Tampermonkey。
+
+App 裡面有一個內建瀏覽器，會打開 Uber Eats 網頁版，並自動載入同一支腳本，所以畫面和用法都跟電腦版一樣。
+
+### 下載與安裝
+
+1. **登入 GitHub**：用手機瀏覽器登入 GitHub。repo 是私人的，沒登入就下載不到。
+2. **下載 APK**：打開 [Releases 的 apk-latest](https://github.com/gleam542/ubereat_auto_fill/releases/tag/apk-latest)，下載 `ubereats-promo-autofill.apk`（[直接下載連結](https://github.com/gleam542/ubereat_auto_fill/releases/download/apk-latest/ubereats-promo-autofill.apk)）。
+3. **安裝**：打開下載好的檔案。
+   - 手機若詢問是否「允許安裝不明應用程式」，請允許瀏覽器安裝。
+   - 若 Play 安全防護跳出警告，點「更多詳細資料」→「仍要安裝」。這是因為 App 不是從 Play 商店下載的。
+
+APK 由 GitHub Actions 自動產生：每次推送腳本或 `android/` 底下的程式碼，都會重新打包並更新 Release。
+
+### 使用
+
+1. **打開 App 並登入**：打開「優惠碼自動填入」，會直接進入 Uber Eats 網頁版，登入你的帳號。
+   - 建議用手機號碼或 Email 登入。
+   - 「用 Google 登入」在 App 內建瀏覽器裡可能會被 Google 擋下。
+2. **開始填入**：用法跟電腦版一樣，按「① 抓取優惠碼」，再按「② 開始填入」。
+   - App 會自己下載文章，不會跳出允許連線的詢問。
+3. **右上角選單**：
+   - **Uber Eats 首頁**
+   - **打開優惠文章（手動擷取）**：文章抓不到時用。打開文章後按「擷取本頁優惠碼」，再回 Uber Eats 首頁。
+   - **重新整理**
+   - **檢查腳本更新**
+   - **版本資訊**
+
+### 更新
+
+- **腳本**：App 每次啟動都會檢查 GitHub 上有沒有更新版本的腳本。有的話會自動下載，重新整理頁面後生效。這需要 repo 是公開的。
+- **App 本身**：重新下載 APK 安裝。
+  - 如果安裝時出現「與現有套件衝突」，代表兩次打包用的簽章不同。請先解除安裝舊版再安裝；登入狀態和優惠碼清單會被清掉。
+  - 想避免這個問題，請看下面的「（進階）固定簽章」。
+
+### （進階）固定簽章
+
+沒設定的話，每次打包都用臨時的 debug 金鑰，所以新版 APK 不能直接覆蓋舊版。
+
+在電腦上產生一把金鑰，並把它存成 GitHub Secrets，之後每次打包都會用同一把，就能直接覆蓋更新：
+
+```bash
+keytool -genkeypair -v -keystore release.keystore -alias uepa -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 release.keystore > release.keystore.b64
+```
+
+到 repo 的「Settings」→「Secrets and variables」→「Actions」新增以下四個 Secret：
+
+| Secret 名稱 | 內容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | `release.keystore.b64` 的內容 |
+| `ANDROID_KEYSTORE_PASSWORD` | 金鑰庫密碼 |
+| `ANDROID_KEY_ALIAS` | `uepa` |
+| `ANDROID_KEY_PASSWORD` | 金鑰密碼 |
+
+`release.keystore` 請自己保管好，不要提交到 repo。
+
+## 在 Android 手機上使用（Firefox + Tampermonkey）
+
+不想裝 App 的話，也可以用瀏覽器。Android 版 Chrome 不能裝擴充功能，請改用 **Firefox**。手機版 Firefox 可以裝 Tampermonkey；找不到的話，Violentmonkey 也可以。
 
 1. **安裝 Firefox**：從 Play 商店安裝。
 2. **安裝 Tampermonkey**：在 Firefox 點右上「⋮」→「附加元件」→「探索更多 Firefox 附加元件」，搜尋 Tampermonkey 並新增。
@@ -96,6 +155,21 @@ Android 版 Chrome 不能裝擴充功能，請改用 **Firefox**。手機版 Fir
 - 模擬結帳頁：`test/fixtures/mock-ubereats.html`，會模仿 React 受控輸入框和各種錯誤訊息。
 
 兩個檔案裡的優惠碼都是虛構的。
+
+另外也會測 Android App 用的 `android/app/src/main/assets/gm-shim.js`：用假的 `UepaBridge` 模擬 App 端，確認 GM_* 橋接能正常抓取和填入。
+
+Android App 的原始碼在 `android/`：
+
+- App 本身：一個 WebView Activity 加上 GM_* 橋接。
+- 內建腳本：打包時從 repo 根目錄複製進 APK。
+- 版本號：直接用腳本的 `@version`。
+
+要在本機打包，需要 Android SDK，然後執行：
+
+```bash
+cd android
+gradle assembleRelease
+```
 
 ```bash
 npm install

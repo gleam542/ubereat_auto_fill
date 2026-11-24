@@ -9,6 +9,7 @@ const { chromium, devices } = require('playwright');
 const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'ubereats-promo-autofill.user.js'), 'utf8');
 const ARTICLE = fs.readFileSync(path.join(__dirname, 'fixtures', 'callingtaiwan-sample.html'), 'utf8');
 const MOCK_UE = fs.readFileSync(path.join(__dirname, 'fixtures', 'mock-ubereats.html'), 'utf8');
+const SHIM = fs.readFileSync(path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'gm-shim.js'), 'utf8');
 
 const ARTICLE_URL = 'https://www.callingtaiwan.com.tw/ubereats-test-article/';
 const CHECKOUT_URL = 'https://www.ubereats.com/tw/checkout';
@@ -231,4 +232,62 @@ test('自動更新設定：@version 與 package.json 一致，更新網址指向
   const expected = 'https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js';
   assert.equal(meta('updateURL'), expected);
   assert.equal(meta('downloadURL'), expected);
+});
+
+test('Android App：GM_* 透過 UepaBridge 橋接，能抓取並填入；重複注入只會掛一次', async () => {
+  const context = await browser.newContext({ ...devices['Pixel 7'] });
+  const page = await context.newPage();
+  await page.route('**/*', (route) =>
+    route.request().url() === CHECKOUT_URL
+      ? route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: MOCK_UE })
+      : route.fulfill({ status: 404, body: '' })
+  );
+  await page.exposeFunction('__testFetch', (u) =>
+    u.startsWith('https://www.callingtaiwan.com.tw/') ? { status: 200, text: ARTICLE } : { status: 404, text: '' }
+  );
+  await page.addInitScript((now) => {
+    window.__UEPA_EXPOSE__ = true;
+    Date.now = () => now;
+    // 模擬 MainActivity.Bridge：getValue 同步回傳字串或 null；httpGet 非同步回呼 __uepaHttpCallback
+    const store = {};
+    window.__bridgeRequests = [];
+    window.UepaBridge = {
+      getValue: (k) => (k in store ? store[k] : null),
+      setValue: (k, v) => {
+        store[k] = v;
+      },
+      httpGet: (url, id) => {
+        window.__bridgeRequests.push(url);
+        window.__testFetch(url).then((r) => window.__uepaHttpCallback(id, r.status, r.text));
+      },
+      _store: store,
+    };
+  }, FIXED_NOW);
+  await page.goto(CHECKOUT_URL);
+
+  // 與 MainActivity.inject() 相同的包裝；注入兩次，模擬 onPageFinished 觸發多次
+  const injected = `(function(){if(window.__uepaLoaded)return;window.__uepaLoaded=true;\n${SHIM}\n${SCRIPT}\n})();`;
+  await page.evaluate(injected);
+  await page.evaluate(injected);
+  assert.equal(await page.locator('#uepa-host').count(), 1);
+
+  const panel = page.locator('#uepa-host');
+  await setNoDelay(panel);
+  await panel.locator('[data-act=fetch]').click();
+  await panel.getByText('抓到 9 組優惠碼').waitFor();
+  await panel.locator('[data-act=run]').click();
+  await page.waitForFunction(() => window.__UEPA__.state.lastRun !== null, null, { timeout: 60000 });
+
+  const result = await page.evaluate(() => ({
+    status: Object.fromEntries(window.__UEPA__.state.codes.map((c) => [c.code, c.status])),
+    stored: JSON.parse(window.UepaBridge._store.codes).length,
+    requests: window.__bridgeRequests,
+  }));
+  assert.equal(result.status.GOODCODE1, 'success');
+  assert.equal(result.status.GOOD2026, 'success');
+  assert.equal(result.status.OLDCODE, 'fail');
+  assert.equal(result.stored, 9, '優惠碼清單要透過 bridge 存到 App');
+  assert.equal(result.requests.length, 1);
+  assert.ok(result.requests[0].startsWith('https://www.callingtaiwan.com.tw/'));
+  await context.close();
 });

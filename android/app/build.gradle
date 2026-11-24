@@ -1,0 +1,69 @@
+plugins {
+    id 'com.android.application'
+}
+
+// App 內建的腳本就是 repo 根目錄那支 userscript；版本號也跟著它走
+def userscript = rootProject.file('../ubereats-promo-autofill.user.js')
+def versionMatch = (userscript.getText('UTF-8') =~ /@version\s+(\d+)\.(\d+)\.(\d+)/)
+if (!versionMatch.find()) {
+    throw new GradleException('找不到 userscript 的 @version')
+}
+def (major, minor, patch) = (1..3).collect { versionMatch.group(it) as int }
+def generatedAssets = layout.buildDirectory.dir('generated/userscript-assets').get().asFile
+
+android {
+    namespace 'io.github.gleam542.uepa'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.gleam542.uepa'
+        minSdk 26
+        targetSdk 35
+        versionCode major * 10000 + minor * 100 + patch
+        versionName "${major}.${minor}.${patch}"
+    }
+
+    // 有設定簽章金鑰（GitHub Secrets）就用固定金鑰，否則用 debug 金鑰
+    signingConfigs {
+        stable {
+            def keystore = System.getenv('UEPA_KEYSTORE')
+            if (keystore) {
+                storeFile file(keystore)
+                storePassword System.getenv('UEPA_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('UEPA_KEY_ALIAS')
+                keyPassword System.getenv('UEPA_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig System.getenv('UEPA_KEYSTORE') ? signingConfigs.stable : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            assets.srcDir(generatedAssets)
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+def copyUserscript = tasks.register('copyUserscript', Copy) {
+    from userscript
+    into generatedAssets
+}
+tasks.named('preBuild') {
+    dependsOn copyUserscript
+}
