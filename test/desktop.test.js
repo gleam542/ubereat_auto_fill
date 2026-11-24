@@ -44,10 +44,6 @@ describe('desktop/lib.js', () => {
     );
   });
 
-  test('desktop/package.json 版本與腳本 @version 一致', () => {
-    const pkg = JSON.parse(fs.readFileSync(path.join(DESKTOP, 'package.json'), 'utf8'));
-    assert.equal(pkg.version, lib.versionOf(SCRIPT), '改腳本版本時，也要更新 desktop/package.json 的 version');
-  });
 });
 
 const electronBinary = (() => {

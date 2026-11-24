@@ -310,3 +310,67 @@ test('Android App：GM_* 透過 UepaBridge 橋接，能抓取並填入；重複�
   assert.ok(result.requests[0].startsWith('https://www.callingtaiwan.com.tw/'));
   await context.close();
 });
+
+test('iPhone Safari（Userscripts）：只有非同步 GM.getValue/GM.setValue 時，跨網站共用清單並能填入', async () => {
+  const { isMobile, hasTouch, viewport, deviceScaleFactor, userAgent } = devices['iPhone 15'];
+  const context = await browser.newContext({ isMobile, hasTouch, viewport, deviceScaleFactor, userAgent });
+  const mem = {}; // 模擬 Userscripts 的儲存：兩個網站共用
+  await context.route('**/*', (route) => {
+    const url = route.request().url();
+    if (url === ARTICLE_URL) return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: ARTICLE });
+    if (url === CHECKOUT_URL) return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: MOCK_UE });
+    return route.fulfill({ status: 404, body: '' });
+  });
+  await context.exposeFunction('__gmGet', (k) => (k in mem ? mem[k] : null));
+  await context.exposeFunction('__gmSet', (k, v) => {
+    mem[k] = v;
+  });
+  await context.exposeFunction('__testFetch', (u) =>
+    u.startsWith('https://www.callingtaiwan.com.tw/') ? { status: 200, text: ARTICLE } : { status: 404, text: '' }
+  );
+  await context.addInitScript((now) => {
+    window.__UEPA_EXPOSE__ = true;
+    Date.now = () => now;
+    // 只有 GM.*（Promise），沒有 GM_getValue / GM_setValue
+    window.GM = {
+      getValue: (k, d) => window.__gmGet(k).then((v) => (v === null || v === undefined ? d : v)),
+      setValue: (k, v) => window.__gmSet(k, v),
+      xmlHttpRequest: (o) => {
+        window.__testFetch(o.url).then((r) => o.onload && o.onload({ status: r.status, responseText: r.text }));
+      },
+    };
+  }, FIXED_NOW);
+
+  // 分頁 1：在優惠文章按「擷取本頁優惠碼」
+  const article = await context.newPage();
+  await article.goto(ARTICLE_URL);
+  await article.addScriptTag({ content: SCRIPT });
+  assert.equal(await article.evaluate(() => typeof window.GM_getValue), 'undefined');
+  await article.locator('#uepa-host').getByText('擷取本頁優惠碼').click();
+  await article.locator('#uepa-host').getByText('擷取到 9 組').waitFor();
+  assert.equal(JSON.parse(mem.codes).length, 9);
+
+  // 分頁 2：Uber Eats 讀得到剛剛擷取的清單
+  const checkout = await context.newPage();
+  await checkout.goto(CHECKOUT_URL);
+  await checkout.addScriptTag({ content: SCRIPT });
+  const panel = checkout.locator('#uepa-host');
+  await panel.getByText('已載入上次的優惠碼清單').waitFor();
+  await panel.getByText('共 9 組').waitFor();
+
+  await setNoDelay(panel);
+  await panel.locator('[data-act=run]').click();
+  await checkout.waitForFunction(() => window.__UEPA__.state.lastRun !== null, null, { timeout: 60000 });
+
+  // 結果透過 GM.setValue 存回去
+  const saved = Object.fromEntries(JSON.parse(mem.codes).map((c) => [c.code, c.status]));
+  assert.equal(saved.GOODCODE1, 'success');
+  assert.equal(saved.USEDCODE, 'already');
+  assert.equal(saved.OLDCODE, 'fail');
+  assert.equal(JSON.parse(mem.settings).delaySec, 0);
+
+  // 回到文章分頁時會重新讀取（visibilitychange / focus）
+  await article.bringToFront();
+  await article.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await context.close();
+});

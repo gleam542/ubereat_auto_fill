@@ -195,6 +195,31 @@ base64 -w0 release.keystore > release.keystore.b64
 - 在 Firefox 選單勾選「電腦版網站」再試一次。
 - 用「指定輸入框 / 指定套用按鈕」手動指定。
 
+## iPhone / iPad（Safari）
+
+iOS 不能像 Android 那樣直接裝 APK。蘋果規定 App 只能從 App Store 安裝，不然就要用自己的 Apple 帳號簽章，而且 7 天就會失效。
+
+所以 iPhone 上請用 Safari，加上免費的 Safari 延伸功能「Userscripts」。它會執行同一支腳本，用法跟電腦版一樣。
+
+### 設定（只要做一次）
+
+1. **安裝 Userscripts**：從 App Store 安裝免費的「Userscripts」。
+2. **選資料夾**：打開 Userscripts App，照畫面指示選一個資料夾來放腳本，例如在「我的 iPhone」裡新建一個 `Userscripts` 資料夾。
+3. **打開延伸功能**：到 iPhone「設定」→「App」→「Safari」→「延伸功能」→「Userscripts」，把它打開，並允許它在 `ubereats.com` 和 `callingtaiwan.com.tw` 上執行，或允許所有網站。
+4. **安裝腳本**：
+   - **repo 公開時**：用 Safari 打開 [安裝網址](https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js)，點網址列旁邊的延伸功能圖示 →「Userscripts」，再按安裝。
+   - **repo 私人時**：在 Safari 登入 GitHub，打開 `ubereats-promo-autofill.user.js` 並按「Raw」，全選、複製。然後在 Userscripts 新增一個 JS 腳本，貼上並存檔。
+
+### 使用
+
+1. **打開網頁版**：在 Safari 網址列直接輸入 `ubereats.com/tw`。
+   - 手機有裝 Uber Eats App 的話，點連結可能會直接跳進 App，腳本在 App 裡沒有作用。
+   - 會跳的話，改成在網址列輸入，或長按連結選「在新分頁中打開」。
+2. **登入並開始填入**：登入後，畫面下方會出現面板。按「① 抓取優惠碼」，再按「② 開始填入」。
+3. **抓不到文章時**：在 Safari 打開優惠文章，按「擷取本頁優惠碼」，再切回 Uber Eats 分頁。清單會自動同步過去。
+
+需要 iOS 16.4 以上。也可以用付費的 Tampermonkey for Safari 取代 Userscripts，安裝方式差不多。
+
 ## 注意事項
 
 - **這個腳本還沒在真實網站上跑過。** 開發環境連不到 callingtaiwan.com.tw 和 ubereats.com，所以文章的解析規則和 Uber Eats 的欄位偵測都是通用規則，只用模擬頁面測過。第一次使用時請看著它跑，有問題可以用上面的「指定」功能修正。
@@ -211,7 +236,7 @@ base64 -w0 release.keystore > release.keystore.b64
 
 兩個檔案裡的優惠碼都是虛構的。
 
-另外也會測 Android App 用的 `shared/gm-shim.js`（Android App 與電腦版共用）：用假的 `UepaBridge` 模擬 App 端，確認 GM_* 橋接能正常抓取和填入。
+另外也會模擬 iPhone Userscripts 只有非同步 `GM.getValue` / `GM.setValue` 的情況，測試跨網站共用清單；並測 Android App 用的 `shared/gm-shim.js`（Android App 與電腦版共用）：用假的 `UepaBridge` 模擬 App 端，確認 GM_* 橋接能正常抓取和填入。
 
 Android App 的原始碼在 `android/`：
 

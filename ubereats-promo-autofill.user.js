@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UberEats 優惠碼自動填入
 // @namespace    https://github.com/gleam542/ubereat_auto_fill
-// @version      1.3.0
+// @version      1.4.0
 // @description  從 callingtaiwan.com.tw 的 Uber Eats 優惠文章抓出所有優惠碼，並逐一自動填入 ubereats.com 的優惠碼欄位
 // @homepageURL  https://github.com/gleam542/ubereat_auto_fill
 // @updateURL    https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js
@@ -14,6 +14,9 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM.xmlHttpRequest
+// @grant        GM.getValue
+// @grant        GM.setValue
 // @connect      www.callingtaiwan.com.tw
 // @connect      callingtaiwan.com.tw
 // @run-at       document-idle
@@ -39,8 +42,43 @@
   /* 儲存 / 網路                                                          */
   /* ------------------------------------------------------------------ */
 
+  // 儲存後端，依序嘗試：
+  // 1. 同步的 GM_getValue / GM_setValue（Tampermonkey、Violentmonkey、本專案的 App）
+  // 2. 非同步的 GM.getValue / GM.setValue（iPhone Safari 的 Userscripts 等）：啟動時先讀進記憶體
+  // 3. localStorage（沒有任何 GM API 時；不同網站之間不共用）
+  const STORE_KEYS = ['codes', 'settings', 'locator.input', 'locator.button'];
+  const asyncCache = {};
+  let asyncGM = null;
+  const hasSyncGM = () => typeof GM_getValue === 'function' && typeof GM_setValue === 'function';
+  const hasAsyncGM = () => typeof GM !== 'undefined' && !!GM && typeof GM.getValue === 'function' && typeof GM.setValue === 'function';
+
   const store = {
+    async init() {
+      if (!hasSyncGM() && hasAsyncGM()) {
+        asyncGM = GM;
+        await this.refresh();
+      }
+    },
+    /** 非同步後端：重新讀取（別的分頁可能改過） */
+    async refresh() {
+      if (!asyncGM) return;
+      for (const key of STORE_KEYS) {
+        try {
+          asyncCache[key] = await asyncGM.getValue(key);
+        } catch (e) {
+          /* keep old value */
+        }
+      }
+    },
     get(key, fallback) {
+      if (asyncGM) {
+        const v = asyncCache[key];
+        try {
+          return v === undefined || v === null ? fallback : JSON.parse(v);
+        } catch (e) {
+          return fallback;
+        }
+      }
       try {
         if (typeof GM_getValue === 'function') {
           const v = GM_getValue(key);
@@ -58,6 +96,15 @@
     },
     set(key, value) {
       const raw = JSON.stringify(value);
+      if (asyncGM) {
+        asyncCache[key] = raw;
+        try {
+          Promise.resolve(asyncGM.setValue(key, raw)).catch(() => {});
+        } catch (e) {
+          /* ignore */
+        }
+        return;
+      }
       try {
         if (typeof GM_setValue === 'function') {
           GM_setValue(key, raw);
@@ -1022,10 +1069,16 @@
     });
 
     // 在別的分頁擷取過優惠碼，回到這個分頁時同步
-    window.addEventListener('focus', () => {
+    const syncFromStore = async () => {
+      if (state.running) return;
+      await store.refresh();
       if (state.running) return;
       state.codes = store.get('codes', state.codes);
       render();
+    };
+    window.addEventListener('focus', syncFromStore);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncFromStore();
     });
 
     setStatus(
@@ -1050,7 +1103,8 @@
           <div class="list"></div>
         </div>
       </div>`;
-    root.querySelector('[data-act=grab]').addEventListener('click', () => {
+    root.querySelector('[data-act=grab]').addEventListener('click', async () => {
+      await store.refresh();
       const found = extractCodes(document, { now: Date.now() });
       const { codes, added } = mergeCodes(store.get('codes', []), found);
       store.set('codes', codes);
@@ -1067,10 +1121,14 @@
     });
   }
 
-  function main() {
+  async function main() {
     const host = location.hostname;
-    if (/(^|\.)ubereats\.com$/.test(host)) mountUberPanel();
-    else if (/(^|\.)callingtaiwan\.com\.tw$/.test(host)) mountSourcePanel();
+    const isUber = /(^|\.)ubereats\.com$/.test(host);
+    const isSource = /(^|\.)callingtaiwan\.com\.tw$/.test(host);
+    if (!isUber && !isSource) return;
+    await store.init();
+    if (isUber) mountUberPanel();
+    else mountSourcePanel();
   }
 
   const api = {
@@ -1091,5 +1149,5 @@
     /* ignore */
   }
 
-  main();
+  main().catch((e) => console.error("[UberEats 優惠碼]", e));
 })();
