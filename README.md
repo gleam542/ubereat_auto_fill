@@ -12,9 +12,18 @@
 
 1. 在電腦版瀏覽器（Chrome、Edge 或 Firefox）安裝 [Tampermonkey](https://www.tampermonkey.net/)。
    - 新版 Chrome 要先打開擴充功能的「允許使用者指令碼」開關：在 `chrome://extensions` 找到 Tampermonkey，點「詳細資料」，再打開「允許使用者指令碼」。
-2. 打開 Tampermonkey 的「建立新腳本」。
-3. 把 [`ubereats-promo-autofill.user.js`](./ubereats-promo-autofill.user.js) 的全部內容貼上，然後存檔。
-   - 如果這個 repo 是公開的，也可以直接點檔案的「Raw」網址，Tampermonkey 會跳出安裝畫面。
+2. 點這個網址：**[安裝腳本](https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js)**。Tampermonkey 會跳出安裝畫面，按「安裝」。
+   - 這個網址要等 repo 設成**公開**才能用。repo 還是私人的時候，請改用複製貼上：打開 Tampermonkey 的「建立新腳本」，把 [`ubereats-promo-autofill.user.js`](./ubereats-promo-autofill.user.js) 的全部內容貼上，然後存檔。
+
+## 自動更新
+
+腳本裡已經設定好 `@updateURL` 和 `@downloadURL`，它們指向本 repo 預設分支上的最新版本。
+
+- Tampermonkey 預設每天檢查一次更新，發現 `@version` 變大就會自動更新。
+- 想立刻更新：在 Tampermonkey 控制台勾選這個腳本，按「檢查更新」。
+- 要求：
+  - repo 必須是**公開**的，Tampermonkey 才讀得到更新網址。
+  - 要裝 1.2.0 以後的版本。1.2.0 以前的版本沒有更新網址，請用上面的安裝網址重新安裝一次（會直接覆蓋舊版，存好的優惠碼清單不會不見）。
 
 ## 使用方式
 
@@ -52,12 +61,13 @@ Android 版 Chrome 不能裝擴充功能，請改用 **Firefox**。手機版 Fir
 
 1. **安裝 Firefox**：從 Play 商店安裝。
 2. **安裝 Tampermonkey**：在 Firefox 點右上「⋮」→「附加元件」→「探索更多 Firefox 附加元件」，搜尋 Tampermonkey 並新增。
-3. **安裝這個腳本**：這個 repo 目前是私人的，沒辦法點一下網址就安裝，要用複製貼上。
-   1. 在手機版 Firefox 登入 GitHub，打開本 repo 的 `ubereats-promo-autofill.user.js`，按「Raw」。
-      - 如果 Tampermonkey 跳出安裝畫面，按「安裝」就完成了。
-      - 如果沒跳出來，長按文字並全選、複製。
-   2. 點「⋮」→「附加元件」→ Tampermonkey →「控制台（Dashboard）」→「+」新增腳本。
-   3. 刪掉預設內容，貼上剛剛複製的程式碼，存檔。
+3. **安裝這個腳本**：
+   - **repo 公開時**：在手機 Firefox 打開 [安裝網址](https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js)，按「安裝」。之後會自動更新，不用再管它。
+   - **repo 還是私人時**：要用複製貼上。
+     1. 在手機版 Firefox 登入 GitHub，打開本 repo 的 `ubereats-promo-autofill.user.js`，按「Raw」。如果 Tampermonkey 跳出安裝畫面，按「安裝」就完成了。
+     2. 如果沒跳出來，長按文字並全選、複製。
+     3. 點「⋮」→「附加元件」→ Tampermonkey →「控制台（Dashboard）」→「+」新增腳本。
+     4. 刪掉預設內容，貼上剛剛複製的程式碼，存檔。
 4. **打開 Uber Eats 網頁**：在網址列直接輸入 `ubereats.com/tw`。
    - 腳本只在瀏覽器裡有效。手機有裝 Uber Eats App 的話，點連結可能會直接跳進 App。
    - 如果會跳進 App，到 Firefox「設定」把「在應用程式中開啟連結（Open links in apps）」關掉。
@@ -92,3 +102,5 @@ npm install
 npx playwright install chromium
 npm test
 ```
+
+修改腳本後，記得同時把 `@version` 和 `package.json` 的 `version` 調大。版本號沒變，Tampermonkey 不會更新，測試也會提醒你。

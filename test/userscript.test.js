@@ -222,3 +222,13 @@ test('手機畫面：面板最多佔半個螢幕；需要手動打開視窗時�
   assert.equal(minimized, false, '跑完後面板應恢復展開');
   await context.close();
 });
+
+test('自動更新設定：@version 與 package.json 一致，更新網址指向本腳本', () => {
+  const header = SCRIPT.slice(0, SCRIPT.indexOf('// ==/UserScript=='));
+  const meta = (key) => (header.match(new RegExp(`^// @${key}\\s+(.+)$`, 'm')) || [])[1];
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.equal(meta('version'), pkg.version, '改腳本時請同時更新 @version 和 package.json 的 version');
+  const expected = 'https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js';
+  assert.equal(meta('updateURL'), expected);
+  assert.equal(meta('downloadURL'), expected);
+});

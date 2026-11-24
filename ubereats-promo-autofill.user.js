@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         UberEats 優惠碼自動填入
 // @namespace    https://github.com/gleam542/ubereat_auto_fill
-// @version      1.1.0
+// @version      1.2.0
 // @description  從 callingtaiwan.com.tw 的 Uber Eats 優惠文章抓出所有優惠碼，並逐一自動填入 ubereats.com 的優惠碼欄位
+// @homepageURL  https://github.com/gleam542/ubereat_auto_fill
+// @updateURL    https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js
+// @downloadURL  https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js
 // @match        https://www.ubereats.com/*
 // @match        https://ubereats.com/*
 // @match        https://m.ubereats.com/*
