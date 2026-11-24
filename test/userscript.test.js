@@ -9,7 +9,7 @@ const { chromium, devices } = require('playwright');
 const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'ubereats-promo-autofill.user.js'), 'utf8');
 const ARTICLE = fs.readFileSync(path.join(__dirname, 'fixtures', 'callingtaiwan-sample.html'), 'utf8');
 const MOCK_UE = fs.readFileSync(path.join(__dirname, 'fixtures', 'mock-ubereats.html'), 'utf8');
-const SHIM = fs.readFileSync(path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'gm-shim.js'), 'utf8');
+const SHIM = fs.readFileSync(path.join(__dirname, '..', 'shared', 'gm-shim.js'), 'utf8');
 
 const ARTICLE_URL = 'https://www.callingtaiwan.com.tw/ubereats-test-article/';
 const CHECKOUT_URL = 'https://www.ubereats.com/tw/checkout';

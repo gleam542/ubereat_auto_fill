@@ -1,0 +1,85 @@
+name: Desktop apps
+
+# 只在電腦版程式碼變動時打包（macOS 機器在私人 repo 會用掉較多 Actions 額度）。
+# 只改 userscript 時不用重新打包：App 會自動下載新版腳本（repo 公開時），
+# 也可以到 Actions 頁面手動按「Run workflow」。
+on:
+  push:
+    paths:
+      - 'desktop/**'
+      - 'shared/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+          - os: macos-latest
+            target: --mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist -- ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Publish release "desktop-latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          ls -la out
+          gh release delete desktop-latest --yes --cleanup-tag || true
+          gh release create desktop-latest out/* \
+            --target "$GITHUB_SHA" \
+            --latest=false \
+            --title "電腦版 v$VERSION（Windows / Mac）" \
+            --notes "Windows：下載 ubereat_auto_fill-windows.exe，直接雙擊執行。
+          Mac（Apple 晶片 M1～M4）：下載 ubereat_auto_fill-mac-arm64.dmg。
+          Mac（Intel）：下載 ubereat_auto_fill-mac-x64.dmg。
+          第一次打開會出現安全性警告，處理方式請看 README 的「電腦版（Windows / Mac）」一節。"

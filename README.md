@@ -57,6 +57,59 @@ Uber Eats 改版後，自動偵測可能會失效。這時打開 **手動新增 
 
 腳本會記住你指定的位置。
 
+## 電腦版（Windows / Mac）
+
+不想裝 Tampermonkey 的話，可以直接用電腦版程式。程式裡有一個內建瀏覽器，會打開 Uber Eats 網頁版並自動載入同一支腳本，用法跟上面一樣。
+
+### 下載
+
+先登入 GitHub（repo 是私人的），再到 [Releases 的 desktop-latest](https://github.com/gleam542/ubereat_auto_fill/releases/tag/desktop-latest) 下載對應的檔案：
+
+| 電腦 | 檔案 |
+| --- | --- |
+| Windows | `ubereat_auto_fill-windows.exe` |
+| Mac（Apple 晶片 M1～M4） | `ubereat_auto_fill-mac-arm64.dmg` |
+| Mac（Intel） | `ubereat_auto_fill-mac-x64.dmg` |
+
+不知道 Mac 是哪一種的話：點左上角蘋果選單 →「關於這台 Mac」，「晶片」寫 Apple M 開頭的是 Apple 晶片，「處理器」寫 Intel 的是 Intel。
+
+### 第一次打開
+
+程式沒有向微軟或蘋果購買開發者簽章，所以第一次打開時系統會擋一下。
+
+**Windows**
+
+1. 直接雙擊 `ubereat_auto_fill-windows.exe`，不用安裝。
+2. 如果出現「Windows 已保護您的電腦」，點「其他資訊」→「仍要執行」。
+3. 每次打開都要先解壓縮，會等幾秒鐘，這是正常的。
+
+**Mac**
+
+1. 打開 `.dmg`，把「UberEat 優惠碼」拖到「應用程式」資料夾。
+2. 到「應用程式」資料夾打開它。系統會說無法確認是否含有惡意軟體，先按「完成」或「取消」。
+3. 打開「系統設定」→「隱私權與安全性」，往下捲，在「UberEat 優惠碼」旁邊按「仍要打開」，再輸入電腦密碼。
+4. 如果系統說「已損毀，無法打開」，打開「終端機」，貼上以下指令並按 Enter，再重新打開程式：
+
+   ```bash
+   xattr -cr "/Applications/UberEat 優惠碼.app"
+   ```
+
+### 使用
+
+1. 打開後會直接進入 Uber Eats 網頁版，登入你的帳號。
+2. 按右下角面板的「① 抓取優惠碼」，再按「② 開始填入」。
+3. 視窗上方選單：
+   - 「頁面」：回 Uber Eats 首頁、打開優惠文章（手動擷取）、上一頁、重新整理、放大縮小。
+   - 「說明」：檢查腳本更新、版本資訊。
+
+登入狀態和優惠碼清單會保存在電腦上，下次打開還在。
+
+### 更新
+
+- **腳本**：程式每次打開都會檢查 GitHub 上有沒有更新版本的腳本，有就自動下載，重新整理頁面後生效。這需要 repo 是公開的。
+- **程式本身**：重新下載就好，登入狀態和清單不會不見。
+- **自動打包的時機**：只有 `desktop/` 或 `shared/` 的程式碼有變動時，GitHub Actions 才會重新打包。私人 repo 的 macOS 打包會用掉比較多 Actions 免費額度，所以只改腳本時不會重新打包。需要的話，可以到 Actions 頁面的「Desktop apps」手動按「Run workflow」。
+
 ## Android App（APK）
 
 Android 手機最簡單的用法是直接裝 App，不需要 Firefox 或 Tampermonkey。
@@ -158,7 +211,7 @@ base64 -w0 release.keystore > release.keystore.b64
 
 兩個檔案裡的優惠碼都是虛構的。
 
-另外也會測 Android App 用的 `android/app/src/main/assets/gm-shim.js`：用假的 `UepaBridge` 模擬 App 端，確認 GM_* 橋接能正常抓取和填入。
+另外也會測 Android App 用的 `shared/gm-shim.js`（Android App 與電腦版共用）：用假的 `UepaBridge` 模擬 App 端，確認 GM_* 橋接能正常抓取和填入。
 
 Android App 的原始碼在 `android/`：
 
@@ -166,7 +219,25 @@ Android App 的原始碼在 `android/`：
 - 內建腳本：打包時從 repo 根目錄複製進 APK。
 - 版本號：直接用腳本的 `@version`。
 
-要在本機打包，需要 Android SDK，然後執行：
+電腦版的原始碼在 `desktop/`：
+
+- 程式本身：Electron。
+- 內建腳本：`npm run assets` 會把腳本和 `shared/gm-shim.js` 複製進去。
+
+測試會真的啟動 Electron 跑一遍完整流程，Linux 上沒有螢幕時要用 `xvfb-run`：
+
+```bash
+cd desktop && npm install && cd ..
+xvfb-run -a npm test
+```
+
+本機執行電腦版：
+
+```bash
+cd desktop && npm install && npm start
+```
+
+Android App 要在本機打包，需要 Android SDK，然後執行：
 
 ```bash
 cd android

@@ -1,4 +1,4 @@
-// App 內 WebView 用：把 userscript 需要的 GM_* 函式接到 Android 端的 UepaBridge。
+// App（Android WebView、電腦版 Electron）共用：把 userscript 需要的 GM_* 函式接到 App 端提供的 UepaBridge。
 (function () {
   if (typeof UepaBridge === 'undefined') return;
   var pending = {};

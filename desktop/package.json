@@ -1,0 +1,64 @@
+{
+  "name": "ubereat_auto_fill",
+  "productName": "UberEat 優惠碼",
+  "version": "1.3.0",
+  "description": "把優惠文章裡的 Uber Eats 優惠碼自動填進 Uber Eats",
+  "author": "gleam542",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "assets": "node scripts/copy-assets.js",
+    "start": "npm run assets && electron .",
+    "dist": "npm run assets && electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.1"
+  },
+  "build": {
+    "appId": "io.github.gleam542.uepa",
+    "productName": "UberEat 優惠碼",
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib.js",
+      "assets/**"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "afterPack": "scripts/adhoc-sign.js",
+    "publish": null,
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "ubereat_auto_fill-windows.exe"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": null,
+      "category": "public.app-category.utilities"
+    },
+    "dmg": {
+      "artifactName": "ubereat_auto_fill-mac-${arch}.${ext}"
+    }
+  }
+}

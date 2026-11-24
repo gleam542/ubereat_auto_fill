@@ -4,6 +4,7 @@ plugins {
 
 // App 內建的腳本就是 repo 根目錄那支 userscript；版本號也跟著它走
 def userscript = rootProject.file('../ubereats-promo-autofill.user.js')
+def gmShim = rootProject.file('../shared/gm-shim.js')
 def versionMatch = (userscript.getText('UTF-8') =~ /@version\s+(\d+)\.(\d+)\.(\d+)/)
 if (!versionMatch.find()) {
     throw new GradleException('找不到 userscript 的 @version')
@@ -61,7 +62,7 @@ android {
 }
 
 def copyUserscript = tasks.register('copyUserscript', Copy) {
-    from userscript
+    from userscript, gmShim
     into generatedAssets
 }
 tasks.named('preBuild') {
