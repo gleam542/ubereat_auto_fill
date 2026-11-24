@@ -71,5 +71,5 @@ jobs:
           gh release delete apk-latest --yes --cleanup-tag || true
           gh release create apk-latest ubereat_auto_fill.apk \
             --target "$GITHUB_SHA" \
-            --title "Android App v$VERSION" \
+            --title "Android App v$VERSION (build $GITHUB_RUN_NUMBER)" \
             --notes "在 Android 手機下載 ubereat_auto_fill.apk 並安裝。每次更新程式後都會自動重新產生。安裝與使用說明請看 README 的「Android App（APK）」一節。"

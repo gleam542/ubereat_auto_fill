@@ -60,10 +60,12 @@ public class MainActivity extends Activity {
     private static final int MENU_RELOAD = 3;
     private static final int MENU_UPDATE = 4;
     private static final int MENU_ABOUT = 5;
+    private static final int MENU_DESKTOP = 6;
 
     private final ExecutorService io = Executors.newCachedThreadPool();
     private WebView web;
     private SharedPreferences prefs;
+    private String defaultUserAgent;
     private String userAgent;
     private volatile String currentHost = "";
 
@@ -78,8 +80,10 @@ public class MainActivity extends Activity {
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
-        userAgent = browserLikeUserAgent(settings.getUserAgentString());
-        settings.setUserAgentString(userAgent);
+        settings.setBuiltInZoomControls(true); // 可以雙指縮放
+        settings.setDisplayZoomControls(false);
+        defaultUserAgent = settings.getUserAgentString();
+        applyUserAgent();
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -124,14 +128,35 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * 預設用「電腦版網站」的身分開 Uber Eats：手機版網頁會把 Android 導到 Google Play 要你裝官方 App。
+     * 版面仍會依螢幕寬度自動調整；可以從選單切回手機版。
+     */
+    private boolean desktopMode() {
+        return prefs.getBoolean("desktop_mode", true);
+    }
+
+    private void applyUserAgent() {
+        userAgent = desktopMode() ? desktopUserAgent(defaultUserAgent) : browserLikeUserAgent(defaultUserAgent);
+        web.getSettings().setUserAgentString(userAgent);
+    }
+
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         menu.add(Menu.NONE, MENU_HOME, 0, "Uber Eats 首頁");
         menu.add(Menu.NONE, MENU_SOURCE, 1, "打開優惠文章（手動擷取）");
         menu.add(Menu.NONE, MENU_RELOAD, 2, "重新整理");
         menu.add(Menu.NONE, MENU_UPDATE, 3, "檢查腳本更新");
-        menu.add(Menu.NONE, MENU_ABOUT, 4, "版本資訊");
+        menu.add(Menu.NONE, MENU_DESKTOP, 4, "使用電腦版網站").setCheckable(true);
+        menu.add(Menu.NONE, MENU_ABOUT, 5, "版本資訊");
         return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        MenuItem desktop = menu.findItem(MENU_DESKTOP);
+        if (desktop != null) desktop.setChecked(desktopMode());
+        return super.onPrepareOptionsMenu(menu);
     }
 
     @Override
@@ -148,6 +173,12 @@ public class MainActivity extends Activity {
                 return true;
             case MENU_UPDATE:
                 checkForScriptUpdate(true);
+                return true;
+            case MENU_DESKTOP:
+                prefs.edit().putBoolean("desktop_mode", !desktopMode()).apply();
+                applyUserAgent();
+                toast(desktopMode() ? "已切換為電腦版網站" : "已切換為手機版網站");
+                web.loadUrl(HOME_URL);
                 return true;
             case MENU_ABOUT:
                 toast("App " + appVersion() + "｜腳本 " + versionOf(currentScript()));
@@ -167,7 +198,15 @@ public class MainActivity extends Activity {
             Uri uri = request.getUrl();
             String scheme = uri.getScheme() == null ? "" : uri.getScheme();
             if (scheme.equals("http") || scheme.equals("https")) {
+                if (isAppStoreHost(hostOf(uri.toString()))) {
+                    toast("已擋下跳到應用程式商店的連結");
+                    return true;
+                }
                 return false; // 一律留在 App 內，不跳去 Uber Eats App
+            }
+            if (scheme.equals("market")) {
+                toast("已擋下跳到應用程式商店的連結");
+                return true;
             }
             if (scheme.equals("tel") || scheme.equals("mailto")) {
                 try {
@@ -326,6 +365,19 @@ public class MainActivity extends Activity {
     static String browserLikeUserAgent(String ua) {
         // 拿掉 WebView 標記，避免網站把 App 當成「內嵌瀏覽器」而要求改用官方 App
         return ua.replace("; wv)", ")").replaceAll("Version/\\d+(\\.\\d+)* ", "");
+    }
+
+    /** 偽裝成電腦版 Chrome（沿用 WebView 的 Chrome 版本號） */
+    static String desktopUserAgent(String ua) {
+        Matcher m = Pattern.compile("Chrome/([\\d.]+)").matcher(ua);
+        String chrome = m.find() ? m.group(1) : "131.0.0.0";
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/"
+                + chrome + " Safari/537.36";
+    }
+
+    static boolean isAppStoreHost(String host) {
+        return host.equals("play.google.com") || host.equals("market.android.com")
+                || host.equals("apps.apple.com") || host.equals("itunes.apple.com");
     }
 
     static String hostOf(String url) {
