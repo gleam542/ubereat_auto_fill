@@ -157,14 +157,33 @@ test('在結帳頁：抓取 → 自動打開視窗 → 逐一填入 → 判斷�
   assert.equal(page_.note, '');
   assert.equal(page_.zip, '');
 
-  // 再跑一次：已成功/已擁有的會被略過
+  // 失敗的自動取消勾選；成功/已擁有的維持勾選（下次會被略過）
+  const checked = Object.fromEntries(codes.map((c) => [c.code, c.checked]));
+  assert.deepEqual(checked, {
+    GOODCODE1: true,
+    GOOD2026: true,
+    多吃八折: false,
+    'eats-abc123x': false,
+    USEDCODE: true,
+    OLDCODE: false,
+    TABLECODE7: false,
+    CLIPCODE88: false,
+    美食挺台: false,
+  });
+  await panel.getByText('失敗的 4 組已自動取消勾選').waitFor();
+
+  // 再跑一次：沒有要填的（成功/已擁有的略過、失敗的已取消勾選）
+  await panel.locator('[data-act=run]').click();
+  await panel.getByText('沒有要填入的優惠碼').waitFor();
+  assert.equal(await page.evaluate(() => window.__submitted.length), 7);
+
+  // 手動把失敗的碼勾回去 → 只會重試那一組
+  await panel.locator('label.item', { hasText: 'eats-abc123x' }).locator('input[type=checkbox]').check();
   await panel.locator('[data-act=run]').click();
   await page.waitForFunction(() => window.__UEPA__.state.lastRun !== null && !window.__UEPA__.state.running, null, {
     timeout: 60000,
   });
-  const resubmitted = await page.evaluate(() => window.__submitted.slice(7));
-  assert.ok(!resubmitted.includes('GOODCODE1'));
-  assert.ok(!resubmitted.includes('USEDCODE'));
+  assert.deepEqual(await page.evaluate(() => window.__submitted.slice(7)), ['eats-abc123x']);
   await context.close();
 });
 

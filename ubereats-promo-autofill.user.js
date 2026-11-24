@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UberEats 優惠碼自動填入
 // @namespace    https://github.com/gleam542/ubereat_auto_fill
-// @version      1.2.0
+// @version      1.3.0
 // @description  從 callingtaiwan.com.tw 的 Uber Eats 優惠文章抓出所有優惠碼，並逐一自動填入 ubereats.com 的優惠碼欄位
 // @homepageURL  https://github.com/gleam542/ubereat_auto_fill
 // @updateURL    https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js
@@ -897,6 +897,8 @@
         });
         item.status = r.status;
         item.message = r.message || '';
+        // 失敗的碼自動取消勾選，下次不會再試（想重試可以手動勾回去）
+        if (r.status === 'fail') item.checked = false;
         item.time = Date.now();
         saveCodes();
         render();
@@ -921,7 +923,12 @@
       unpeek();
       saveCodes();
       const ok = queue.filter((c) => c.status === 'success').length;
-      setStatus(`${stopReason ? stopReason + '\n' : '全部填完！\n'}本次成功 ${ok} 組。點優惠碼下方的訊息可以看到 Uber Eats 的回應。`);
+      const failed = queue.filter((c) => c.status === 'fail').length;
+      setStatus(
+        `${stopReason ? stopReason + '\n' : '全部填完！\n'}本次成功 ${ok} 組` +
+          (failed ? `，失敗的 ${failed} 組已自動取消勾選（想重試可以再勾回去）` : '') +
+          '。\n點優惠碼下方的訊息可以看到 Uber Eats 的回應。'
+      );
       render();
     }
 
