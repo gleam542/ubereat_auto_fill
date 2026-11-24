@@ -4,7 +4,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { chromium, devices } = require('playwright');
 
 const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'ubereats-promo-autofill.user.js'), 'utf8');
 const ARTICLE = fs.readFileSync(path.join(__dirname, 'fixtures', 'callingtaiwan-sample.html'), 'utf8');
@@ -23,8 +23,8 @@ after(async () => {
 });
 
 /** 開一個頁面：攔截所有請求回傳測試用 HTML，並提供 GM_* 的替身。 */
-async function openWithScript(url, html) {
-  const context = await browser.newContext();
+async function openWithScript(url, html, contextOptions) {
+  const context = await browser.newContext(contextOptions || {});
   const page = await context.newPage();
   await page.route('**/*', (route) => {
     if (route.request().url() === url) {
@@ -182,5 +182,43 @@ test('遇到「嘗試次數過多」會自動停止', async () => {
   assert.deepEqual(status, { BADONE: 'fail', RATELIMIT: 'rate_limited', GOODCODE1: 'pending' });
   assert.deepEqual(await page.evaluate(() => window.__submitted), ['BADONE', 'RATELIMIT']);
   await panel.getByText('嘗試次數過多').first().waitFor();
+  await context.close();
+});
+
+test('手機畫面：面板最多佔半個螢幕；需要手動打開視窗時會自動縮小並等待', async () => {
+  const mobileHtml = MOCK_UE.replace('<head>', '<head><meta name="viewport" content="width=device-width, initial-scale=1">');
+  const { page, context } = await openWithScript(CHECKOUT_URL, mobileHtml, { ...devices['Pixel 7'] });
+  const panel = page.locator('#uepa-host');
+  await setNoDelay(panel);
+  // 先填會失敗的碼：失敗時視窗不會關，下一組就不用再手動打開
+  await panel.locator('textarea.manual').fill('BADONE\nGOODCODE1');
+  await panel.locator('[data-act=add]').click();
+  await panel.getByText('已加入 2 組').waitFor();
+
+  const viewport = page.viewportSize();
+  const box = await panel.locator('.panel').boundingBox();
+  assert.ok(box.height <= viewport.height * 0.5 + 1, `panel too tall: ${box.height}`);
+  assert.ok(box.x >= 0 && box.x + box.width <= viewport.width, 'panel overflows horizontally');
+
+  // 讓腳本找不到「新增優惠碼」按鈕 → 必須請使用者自己打開
+  await page.evaluate(() => {
+    document.getElementById('open-promo').textContent = '優惠';
+  });
+  await panel.locator('[data-act=run]').click();
+  await page.waitForFunction(
+    () => document.getElementById('uepa-host').shadowRoot.querySelector('.panel').classList.contains('min'),
+    null,
+    { timeout: 15000 }
+  );
+  await panel.getByText('請打開「新增優惠碼」').waitFor();
+  await page.locator('#open-promo').tap();
+
+  await page.waitForFunction(() => window.__UEPA__.state.lastRun !== null, null, { timeout: 60000 });
+  const status = await page.evaluate(() => Object.fromEntries(window.__UEPA__.state.codes.map((c) => [c.code, c.status])));
+  assert.deepEqual(status, { BADONE: 'fail', GOODCODE1: 'success' });
+  const minimized = await page.evaluate(() =>
+    document.getElementById('uepa-host').shadowRoot.querySelector('.panel').classList.contains('min')
+  );
+  assert.equal(minimized, false, '跑完後面板應恢復展開');
   await context.close();
 });

@@ -46,6 +46,31 @@ Uber Eats 改版後，自動偵測可能會失效。這時打開 **手動新增 
 
 腳本會記住你指定的位置。
 
+## 在 Android 手機上使用
+
+Android 版 Chrome 不能裝擴充功能，請改用 **Firefox**。手機版 Firefox 可以裝 Tampermonkey；找不到的話，Violentmonkey 也可以。
+
+1. **安裝 Firefox**：從 Play 商店安裝。
+2. **安裝 Tampermonkey**：在 Firefox 點右上「⋮」→「附加元件」→「探索更多 Firefox 附加元件」，搜尋 Tampermonkey 並新增。
+3. **安裝這個腳本**：這個 repo 目前是私人的，沒辦法點一下網址就安裝，要用複製貼上。
+   1. 在手機版 Firefox 登入 GitHub，打開本 repo 的 `ubereats-promo-autofill.user.js`，按「Raw」。
+      - 如果 Tampermonkey 跳出安裝畫面，按「安裝」就完成了。
+      - 如果沒跳出來，長按文字並全選、複製。
+   2. 點「⋮」→「附加元件」→ Tampermonkey →「控制台（Dashboard）」→「+」新增腳本。
+   3. 刪掉預設內容，貼上剛剛複製的程式碼，存檔。
+4. **打開 Uber Eats 網頁**：在網址列直接輸入 `ubereats.com/tw`。
+   - 腳本只在瀏覽器裡有效。手機有裝 Uber Eats App 的話，點連結可能會直接跳進 App。
+   - 如果會跳進 App，到 Firefox「設定」把「在應用程式中開啟連結（Open links in apps）」關掉。
+5. **登入並開始使用**：步驟跟電腦版一樣，按「① 抓取優惠碼」，再按「② 開始填入」。
+   - 面板固定在畫面下方，最多佔半個螢幕。按「–」可以縮小。
+   - 需要你自己點頁面時（例如打開「新增優惠碼」），面板會自動縮小，等你點完再繼續。
+6. 優惠碼是加到帳號上，之後通常可以直接在 Uber Eats App 結帳時使用。
+
+如果手機版網頁一直找不到優惠碼欄位，可以：
+
+- 在 Firefox 選單勾選「電腦版網站」再試一次。
+- 用「指定輸入框 / 指定套用按鈕」手動指定。
+
 ## 注意事項
 
 - **這個腳本還沒在真實網站上跑過。** 開發環境連不到 callingtaiwan.com.tw 和 ubereats.com，所以文章的解析規則和 Uber Eats 的欄位偵測都是通用規則，只用模擬頁面測過。第一次使用時請看著它跑，有問題可以用上面的「指定」功能修正。

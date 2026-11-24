@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         UberEats 優惠碼自動填入
 // @namespace    https://github.com/gleam542/ubereat_auto_fill
-// @version      1.0.0
+// @version      1.1.0
 // @description  從 callingtaiwan.com.tw 的 Uber Eats 優惠文章抓出所有優惠碼，並逐一自動填入 ubereats.com 的優惠碼欄位
 // @match        https://www.ubereats.com/*
 // @match        https://ubereats.com/*
+// @match        https://m.ubereats.com/*
 // @match        https://www.callingtaiwan.com.tw/*
 // @match        https://callingtaiwan.com.tw/*
 // @grant        GM_xmlhttpRequest
@@ -677,11 +678,14 @@
   const CSS = `
     :host { all: initial; }
     .panel { position: fixed; right: 16px; bottom: 16px; width: 370px; max-width: calc(100vw - 32px); max-height: 78vh;
-      display: flex; flex-direction: column; background: #fff; color: #161616; border: 1px solid #d9d9d9; border-radius: 12px;
+      display: flex; flex-direction: column; box-sizing: border-box; background: #fff; color: #161616; border: 1px solid #d9d9d9; border-radius: 12px;
       box-shadow: 0 10px 32px rgba(0,0,0,.2); z-index: 2147483647; overflow: hidden;
       font: 13px/1.45 -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
     header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #161616; color: #fff; }
-    header b { flex: 1; font-size: 14px; }
+    header b { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .count, .mini { font-size: 12px; white-space: nowrap; }
+    .mini { display: none; color: #ffd27a; }
+    .panel.min .mini { display: inline; }
     header button { background: transparent; color: #fff; border: 1px solid #555; padding: 2px 9px; }
     .body { padding: 10px 12px 12px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
     .panel.min .body { display: none; }
@@ -714,6 +718,13 @@
     summary { cursor: pointer; color: #333; }
     details .row { margin-top: 6px; }
     a { color: #0a6b3a; }
+    /* 手機：貼齊底部、最多佔半個螢幕 */
+    @media (max-width: 600px) {
+      .panel { left: 8px; right: 8px; bottom: 8px; width: auto; max-width: none; max-height: 50vh; }
+      header { padding: 8px 10px; }
+      header b { font-size: 13px; }
+      button { padding: 8px 10px; }
+    }
   `;
 
   function createShadowHost() {
@@ -747,7 +758,7 @@
     root.innerHTML = `
       <style>${CSS}</style>
       <div class="panel ${state.settings.minimized ? 'min' : ''}">
-        <header><b>Uber Eats 優惠碼自動填入</b><span class="count"></span><button data-act="min" title="縮小/展開">–</button></header>
+        <header><b>Uber Eats 優惠碼自動填入</b><span class="count"></span><span class="mini"></span><button data-act="min" title="縮小/展開">–</button></header>
         <div class="body">
           <input class="src" type="text" spellcheck="false" title="優惠碼來源網址">
           <div class="row">
@@ -773,6 +784,15 @@
     const panel = $('.panel');
     const setStatus = (msg) => {
       $('.status').textContent = msg;
+    };
+    // 需要使用者點頁面時先把面板縮小（手機上面板會蓋住頁面），之後再恢復
+    const peek = (hint) => {
+      panel.classList.add('min');
+      $('.mini').textContent = hint;
+    };
+    const unpeek = () => {
+      panel.classList.toggle('min', !!state.settings.minimized);
+      $('.mini').textContent = '';
     };
 
     $('.src').value = state.settings.source;
@@ -861,13 +881,16 @@
         item.status = 'running';
         item.message = '';
         setStatus(`(${i + 1}/${queue.length}) 正在填入 ${item.code} …`);
+        $('.mini').textContent = `填入中 ${i + 1}/${queue.length}`;
         render();
         const r = await applyOne(item.code, {
           shouldAbort: () => state.stopRequested,
-          onWaiting: () =>
+          onWaiting: () => {
             setStatus(
               '找不到優惠碼輸入框。\n請手動打開「新增優惠碼」視窗（結帳頁的「新增優惠碼」，或左上選單 →「優惠」），偵測到後會自動繼續…'
-            ),
+            );
+            peek('請打開「新增優惠碼」');
+          },
         });
         item.status = r.status;
         item.message = r.message || '';
@@ -892,6 +915,7 @@
       }
       state.running = false;
       state.lastRun = { at: Date.now(), reason: stopReason };
+      unpeek();
       saveCodes();
       const ok = queue.filter((c) => c.status === 'success').length;
       setStatus(`${stopReason ? stopReason + '\n' : '全部填完！\n'}本次成功 ${ok} 組。點優惠碼下方的訊息可以看到 Uber Eats 的回應。`);
@@ -900,6 +924,7 @@
 
     function teach(kind) {
       setStatus(kind === 'input' ? '請在頁面上點一下「優惠碼輸入框」…' : '請在頁面上點一下「套用」按鈕…');
+      peek(kind === 'input' ? '請點優惠碼輸入框' : '請點套用按鈕');
       const handler = (e) => {
         if (e.composedPath().includes(host)) return;
         const sel = kind === 'input' ? 'input,textarea' : 'button,[role="button"],input[type="submit"],a';
@@ -909,6 +934,7 @@
         e.stopPropagation();
         document.removeEventListener('click', handler, true);
         store.set('locator.' + kind, makeLocator(el));
+        unpeek();
         setStatus(kind === 'input' ? '已記住輸入框。' : '已記住套用按鈕。');
       };
       document.addEventListener('click', handler, true);
