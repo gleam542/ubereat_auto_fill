@@ -1,0 +1,102 @@
+<!doctype html>
+<!-- 測試用的「模擬」結帳頁：只模仿優惠碼視窗的行為，不是 Uber Eats 的真實頁面。 -->
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mock checkout</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; }
+  .dialog { position: fixed; left: 40px; top: 120px; background: #fff; border: 1px solid #333; padding: 16px; width: 320px; }
+  .toast { position: fixed; top: 8px; left: 8px; background: #222; color: #fff; padding: 6px; }
+</style>
+</head>
+<body>
+<header><input id="search" placeholder="搜尋 Uber Eats"></header>
+<main>
+  <h1>結帳</h1>
+  <section>
+    <h2>優惠</h2>
+    <ul id="applied"></ul>
+    <button id="open-promo">新增優惠碼</button>
+  </section>
+  <label>外送備註 <input id="note" placeholder="給外送員的備註"></label>
+  <label>郵遞區號 <input id="zip" autocomplete="postal-code" placeholder="郵遞區號"></label>
+</main>
+<script>
+(() => {
+  const RESULTS = { GOODCODE1: 'ok', GOOD2026: 'ok', USEDCODE: 'used', OLDCODE: 'expired', RATELIMIT: 'rate' };
+  const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  window.__submitted = [];
+  let dialog = null;
+
+  function openDialog() {
+    if (dialog) return;
+    dialog = document.createElement('div');
+    dialog.className = 'dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.innerHTML =
+      '<h3>新增優惠碼</h3><div data-baseweb="input"><input type="text" aria-label="優惠碼"></div>' +
+      '<p class="err" role="alert"></p><button class="close" aria-label="關閉">×</button><button class="apply" disabled>套用</button>';
+    document.body.appendChild(dialog);
+    const input = dialog.querySelector('input');
+    const apply = dialog.querySelector('.apply');
+    const err = dialog.querySelector('.err');
+
+    // 模仿 React 受控輸入框：直接 input.value = x 不會更新內部 state
+    let tracked = '';
+    let value = '';
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      get() { return proto.get.call(this); },
+      set(v) { tracked = String(v); proto.set.call(this, v); },
+    });
+    input.addEventListener('input', () => {
+      const cur = proto.get.call(input);
+      if (cur === tracked) return;
+      tracked = cur;
+      value = cur;
+      err.textContent = '';
+      apply.disabled = value.trim() === '';
+    });
+
+    dialog.querySelector('.close').onclick = closeDialog;
+    apply.onclick = () => {
+      const code = value.trim();
+      window.__submitted.push(code);
+      apply.disabled = true;
+      apply.textContent = '…';
+      setTimeout(() => {
+        apply.textContent = '套用';
+        apply.disabled = false;
+        const kind = RESULTS[code.toUpperCase()];
+        if (kind === 'ok') {
+          closeDialog();
+          const li = document.createElement('li');
+          li.textContent = code;
+          document.getElementById('applied').appendChild(li);
+          toast('已套用優惠');
+        } else if (kind === 'used') err.textContent = '您已使用過此優惠碼';
+        else if (kind === 'expired') err.textContent = '此優惠碼已過期';
+        else if (kind === 'rate') err.textContent = '嘗試次數過多，請稍後再試';
+        else err.textContent = '此優惠碼無效';
+      }, 400);
+    };
+  }
+  function closeDialog() {
+    if (dialog) dialog.remove();
+    dialog = null;
+  }
+  function toast(msg) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.setAttribute('role', 'status');
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 1500);
+  }
+  document.getElementById('open-promo').onclick = openDialog;
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "ubereat-auto-fill",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tampermonkey userscript: scrape Uber Eats promo codes from callingtaiwan.com.tw and auto-fill them on ubereats.com",
+  "scripts": {
+    "test": "node --test test/userscript.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
