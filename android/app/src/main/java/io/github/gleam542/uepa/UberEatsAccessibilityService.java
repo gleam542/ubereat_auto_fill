@@ -5,6 +5,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -86,13 +87,17 @@ public class UberEatsAccessibilityService extends AccessibilityService {
             "輸入優惠序號", "新增優惠碼", "新增優惠", "輸入優惠碼", "新增促銷代碼",
             "enter promo code", "add promo code", "add promo");
     private static final List<String> NAV_PROMO_LABELS = Arrays.asList(
-            "優惠方案", "優惠", "促銷", "promotions", "promos");
+            "優惠活動", "優惠方案", "優惠與獎勵", "優惠代碼", "促銷活動", "促銷",
+            "promotions", "offers", "promos");
     private static final List<String> NAV_ACCOUNT_LABELS = Arrays.asList(
-            "帳戶", "帳號", "account");
+            "帳戶", "帳號", "個人檔案", "account", "profile");
     private static final List<String> APPLY_BUTTON_LABELS = Arrays.asList(
-            "新增優惠", "套用", "新增", "使用", "兌換", "確定", "apply", "add promo", "add");
+            "領取優惠", "新增優惠", "套用", "新增", "使用", "兌換",
+            "apply", "add promo", "add");
+    private static final List<String> POPUP_CLOSE_LABELS = Arrays.asList(
+            "關閉", "close", "dismiss", "✕", "×", "暫時不要", "略過", "以後再說", "not now", "skip");
     private static final List<String> DISMISS_BUTTON_LABELS = Arrays.asList(
-            "確定", "知道了", "好", "關閉", "了解", "ok", "got it", "dismiss", "close");
+            "確定", "知道了", "好", "了解", "ok", "got it", "dismiss");
 
     private final Runnable ticker = new Runnable() {
         @Override
@@ -227,8 +232,8 @@ public class UberEatsAccessibilityService extends AccessibilityService {
 
         CharSequence pkg = root.getPackageName();
         if (pkg == null || !TARGET_PACKAGE.equals(pkg.toString())) {
-            // 剛啟動時給 App 一點時間切換過去；若超過 12 秒不在 Uber Eats 畫面則自動停止
-            if (now - lastInTargetAt > 12000) {
+            // 剛啟動時給 App 一點時間切換過去；若超過 15 秒不在 Uber Eats 畫面則自動停止
+            if (now - lastInTargetAt > 15000) {
                 stopInternal("已離開 Uber Eats，停止自動填入");
             }
             return;
@@ -260,25 +265,44 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                     }
                     return;
                 }
-                // 偵測是否停在登入 / 註冊頁（確認畫面上沒有優惠入口時才判定，避免誤判）
-                if (findNodeByLabels(root, NAV_INPUT_LABELS) == null
+                boolean onHome = isHomeScreen(root);
+                // 偵測是否停在登入 / 註冊頁（確認不在首頁且畫面上沒有優惠入口時才判定）
+                if (!onHome
+                        && findNodeByLabels(root, NAV_INPUT_LABELS) == null
                         && findNodeByLabels(root, NAV_PROMO_LABELS) == null
                         && isLoginScreen(root)) {
                     stopInternal("偵測到 Uber Eats 尚未登入，請先登入帳號後，再回「UberEat 優惠碼」點「官方App填入」");
                     return;
                 }
-                // 嘗試自動導航到優惠碼輸入頁（每 1.8 秒最多點一次，避免狂點）
-                if (now - lastNavClickAt > 1800) {
-                    if (clickByLabels(root, NAV_INPUT_LABELS)
-                            || clickByLabels(root, NAV_PROMO_LABELS)
-                            || clickByLabels(root, NAV_ACCOUNT_LABELS)) {
+                // 嘗試自動導航到優惠碼輸入頁（每 1.6 秒最多操作一次，避免狂點）
+                if (now - lastNavClickAt > 1600) {
+                    // 1. 首頁或活動廣告彈窗（如「最後機會 / 領取優惠」）→ 先關閉彈窗
+                    if (isPromoPopup(root)) {
+                        if (!clickByLabels(root, POPUP_CLOSE_LABELS)) {
+                            performGlobalAction(GLOBAL_ACTION_BACK);
+                        }
                         lastNavClickAt = now;
                         return;
+                    }
+                    // 2. 在首頁時，只點「帳戶」（含新版左下角人像按鈕），避免誤點首頁中間的「優惠方案」餐廳篩選標籤
+                    if (onHome) {
+                        if (clickByLabels(root, NAV_ACCOUNT_LABELS) || clickBottomLeftAccountButton(root)) {
+                            lastNavClickAt = now;
+                            return;
+                        }
+                    } else {
+                        // 3. 在帳戶頁或優惠活動頁，依序點「輸入優惠序號」或「優惠活動 / 優惠方案」
+                        if (clickByLabels(root, NAV_INPUT_LABELS)
+                                || clickByLabels(root, NAV_PROMO_LABELS)
+                                || clickByLabels(root, NAV_ACCOUNT_LABELS)) {
+                            lastNavClickAt = now;
+                            return;
+                        }
                     }
                 }
                 if (!showedManualHint && now - phaseStartedAt > 8000) {
                     showedManualHint = true;
-                    toast("請手動打開「帳戶 → 優惠方案 → 輸入優惠序號」，偵測到輸入框會自動開始");
+                    toast("請手動點「左下角人像 → 優惠活動 → 輸入優惠序號」，偵測到輸入框會自動開始");
                 }
                 break;
             }
@@ -397,6 +421,76 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         }
         // 歡迎頁沒有底部「帳戶」分頁，但有「開始使用 / 登入 / 註冊」按鈕時也視為未登入
         return welcomeHits > 0 && findNodeByLabels(root, NAV_ACCOUNT_LABELS) == null;
+    }
+
+    /** 偵測首頁或啟動時的促銷彈窗（例如「最後機會 / 領取優惠」廣告視窗，不含優惠碼輸入框）。 */
+    private boolean isPromoPopup(AccessibilityNodeInfo root) {
+        Set<String> texts = new HashSet<>();
+        collectTexts(root, texts);
+        boolean hasClaim = false;
+        boolean hasPromoPageTitle = false;
+        for (String t : texts) {
+            String s = t.trim();
+            if ("優惠活動".equals(s) || "輸入優惠序號".equals(s)) hasPromoPageTitle = true;
+            if ("領取優惠".equals(s) || s.contains("最後機會") || s.contains("限量優惠")
+                    || s.contains("暫時不要") || s.equalsIgnoreCase("claim offer")) {
+                hasClaim = true;
+            }
+        }
+        return hasClaim && !hasPromoPageTitle;
+    }
+
+    /** 判斷目前是否在 Uber Eats 主頁（底部有搜尋列、上方有外送 / 自取 / 行程等分頁）。 */
+    private boolean isHomeScreen(AccessibilityNodeInfo root) {
+        Set<String> texts = new HashSet<>();
+        collectTexts(root, texts);
+        boolean hasSearch = false;
+        boolean hasTab = false;
+        for (String t : texts) {
+            String s = t.trim().toLowerCase(Locale.ROOT);
+            if (s.equals("搜尋") || s.equals("search") || s.contains("搜尋 uber")) hasSearch = true;
+            if (s.equals("外送") || s.equals("自取") || s.equals("行程") || s.equals("優快送")
+                    || s.equals("delivery") || s.equals("pickup")) {
+                hasTab = true;
+            }
+        }
+        return hasSearch && hasTab;
+    }
+
+    /**
+     * 新版 Uber Eats 首頁左下角是一個沒有文字的圓形人像按鈕（位於底部搜尋列左側）。
+     * 當文字/無障礙描述比對不到「帳戶」時，改以畫面座標找到左下角的可點擊圖示按鈕。
+     */
+    private boolean clickBottomLeftAccountButton(AccessibilityNodeInfo root) {
+        Rect rootBounds = new Rect();
+        root.getBoundsInScreen(rootBounds);
+        int width = rootBounds.width();
+        int height = rootBounds.height();
+        if (width <= 0 || height <= 0) return false;
+
+        AccessibilityNodeInfo best = findBottomLeftClickable(root, width, height);
+        return best != null && best.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+    }
+
+    private AccessibilityNodeInfo findBottomLeftClickable(AccessibilityNodeInfo node, int screenW, int screenH) {
+        if (node == null || !node.isVisibleToUser()) return null;
+        if (node.isClickable() && node.isEnabled()) {
+            Rect r = new Rect();
+            node.getBoundsInScreen(r);
+            int w = r.width();
+            int h = r.height();
+            boolean inBottomLeft = r.bottom > screenH * 0.78 && r.top > screenH * 0.70
+                    && r.left < screenW * 0.25 && r.right < screenW * 0.35
+                    && w > 40 && h > 40 && w < screenW * 0.30;
+            if (inBottomLeft) {
+                return node;
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo found = findBottomLeftClickable(node.getChild(i), screenW, screenH);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private boolean fillEditText(AccessibilityNodeInfo edit, String code) {
