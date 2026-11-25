@@ -1,16 +1,19 @@
 package io.github.gleam542.uepa;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.GestureDescription;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -87,7 +90,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
             "輸入優惠序號", "新增優惠碼", "新增優惠", "輸入優惠碼", "新增促銷代碼",
             "enter promo code", "add promo code", "add promo");
     private static final List<String> NAV_PROMO_LABELS = Arrays.asList(
-            "優惠活動", "優惠方案", "優惠與獎勵", "優惠代碼", "促銷活動", "促銷",
+            "各式優惠", "優惠活動", "優惠方案", "優惠與獎勵", "優惠代碼", "促銷活動", "促銷",
             "promotions", "offers", "promos");
     private static final List<String> NAV_ACCOUNT_LABELS = Arrays.asList(
             "帳戶", "帳號", "個人檔案", "account", "profile");
@@ -227,14 +230,18 @@ public class UberEatsAccessibilityService extends AccessibilityService {
 
     private void step() {
         long now = System.currentTimeMillis();
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return;
-
-        CharSequence pkg = root.getPackageName();
-        if (pkg == null || !TARGET_PACKAGE.equals(pkg.toString())) {
-            // 剛啟動時給 App 一點時間切換過去；若超過 15 秒不在 Uber Eats 畫面則自動停止
-            if (now - lastInTargetAt > 15000) {
-                stopInternal("已離開 Uber Eats，停止自動填入");
+        AccessibilityNodeInfo root = findUberEatsRoot();
+        if (root == null) {
+            AccessibilityNodeInfo active = getRootInActiveWindow();
+            String activePkg = active != null && active.getPackageName() != null
+                    ? active.getPackageName().toString() : "null";
+            if (!showedManualHint && now - lastInTargetAt > 6000) {
+                showedManualHint = true;
+                toast("尚未讀取到 Uber Eats 畫面（目前視窗：" + activePkg + "）");
+            }
+            // 剛啟動時給 App 一點時間切換過去；若超過 20 秒不在 Uber Eats 畫面則自動停止
+            if (now - lastInTargetAt > 20000) {
+                stopInternal("已離開或無法讀取 Uber Eats 畫面，停止自動填入");
             }
             return;
         }
@@ -254,7 +261,8 @@ public class UberEatsAccessibilityService extends AccessibilityService {
 
         switch (phase) {
             case NAVIGATE: {
-                AccessibilityNodeInfo edit = findPromoEditText(root);
+                boolean onHome = isHomeScreen(root);
+                AccessibilityNodeInfo edit = onHome ? null : findPromoEditText(root);
                 if (edit != null) {
                     beforeTexts.clear();
                     collectTexts(root, beforeTexts);
@@ -265,7 +273,6 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                     }
                     return;
                 }
-                boolean onHome = isHomeScreen(root);
                 // 偵測是否停在登入 / 註冊頁（確認不在首頁且畫面上沒有優惠入口時才判定）
                 if (!onHome
                         && findNodeByLabels(root, NAV_INPUT_LABELS) == null
@@ -291,7 +298,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                             return;
                         }
                     } else {
-                        // 3. 在帳戶頁或優惠活動頁，依序點「輸入優惠序號」或「優惠活動 / 優惠方案」
+                        // 3. 在帳戶頁或優惠活動頁，依序點「輸入優惠序號」或「各式優惠 / 優惠活動」
                         if (clickByLabels(root, NAV_INPUT_LABELS)
                                 || clickByLabels(root, NAV_PROMO_LABELS)
                                 || clickByLabels(root, NAV_ACCOUNT_LABELS)) {
@@ -300,9 +307,9 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                         }
                     }
                 }
-                if (!showedManualHint && now - phaseStartedAt > 8000) {
+                if (!showedManualHint && now - phaseStartedAt > 7000) {
                     showedManualHint = true;
-                    toast("請手動點「左下角人像 → 優惠活動 → 輸入優惠序號」，偵測到輸入框會自動開始");
+                    toast("請手動點「左下角人像 → 各式優惠 → 輸入優惠序號」（" + debugSummary(root) + "）");
                 }
                 break;
             }
@@ -469,7 +476,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         if (width <= 0 || height <= 0) return false;
 
         AccessibilityNodeInfo best = findBottomLeftClickable(root, width, height);
-        return best != null && best.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        return best != null && clickSelfOrParent(best);
     }
 
     private AccessibilityNodeInfo findBottomLeftClickable(AccessibilityNodeInfo node, int screenW, int screenH) {
@@ -541,15 +548,65 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         return null;
     }
 
+    /**
+     * 先從所有視窗（getWindows）找屬於 Uber Eats 的應用程式視窗，避免鍵盤/系統覆蓋層遮住 getRootInActiveWindow()；
+     * 若找不到再退回 getRootInActiveWindow()。
+     */
+    private AccessibilityNodeInfo findUberEatsRoot() {
+        AccessibilityNodeInfo active = getRootInActiveWindow();
+        if (active != null && active.getPackageName() != null
+                && TARGET_PACKAGE.equals(active.getPackageName().toString())) {
+            return active;
+        }
+        List<AccessibilityWindowInfo> windows = getWindows();
+        if (windows != null) {
+            for (AccessibilityWindowInfo w : windows) {
+                if (w == null || w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r != null && r.getPackageName() != null
+                        && TARGET_PACKAGE.equals(r.getPackageName().toString())) {
+                    return r;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String debugSummary(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> edits = new ArrayList<>();
+        collectEditTexts(root, edits);
+        Set<String> texts = new HashSet<>();
+        collectTexts(root, texts);
+        StringBuilder sb = new StringBuilder();
+        sb.append("輸入框=").append(edits.size()).append(" 畫面=");
+        int shown = 0;
+        for (String t : texts) {
+            if (shown > 0) sb.append('/');
+            sb.append(t.length() > 12 ? t.substring(0, 12) : t);
+            if (++shown >= 4) break;
+        }
+        return sb.toString();
+    }
+
     private void collectEditTexts(AccessibilityNodeInfo node, List<AccessibilityNodeInfo> out) {
         if (node == null || !node.isVisibleToUser()) return;
         CharSequence cls = node.getClassName();
-        if (cls != null && cls.toString().contains("EditText") && node.isEditable()) {
+        boolean isEditClass = cls != null && cls.toString().contains("EditText");
+        if (node.isEditable() || isEditClass || hasAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT)) {
             out.add(node);
         }
         for (int i = 0; i < node.getChildCount(); i++) {
             collectEditTexts(node.getChild(i), out);
         }
+    }
+
+    private boolean hasAction(AccessibilityNodeInfo node, int actionId) {
+        List<AccessibilityNodeInfo.AccessibilityAction> actions = node.getActionList();
+        if (actions == null) return false;
+        for (AccessibilityNodeInfo.AccessibilityAction a : actions) {
+            if (a.getId() == actionId) return true;
+        }
+        return false;
     }
 
     private boolean clickByLabels(AccessibilityNodeInfo root, List<String> labels) {
@@ -567,7 +624,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                 if (label.equals(w) || (label.length() <= w.length() + 6 && label.contains(w))) {
                     // 避免點到輸入框本身
                     CharSequence cls = node.getClassName();
-                    if (cls == null || !cls.toString().contains("EditText")) {
+                    if (!node.isEditable() && (cls == null || !cls.toString().contains("EditText"))) {
                         return node;
                     }
                 }
@@ -584,11 +641,30 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         AccessibilityNodeInfo cur = node;
         for (int depth = 0; depth < 6 && cur != null; depth++) {
             if (cur.isClickable() && cur.isEnabled()) {
-                return cur.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                if (cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    return true;
+                }
             }
             cur = cur.getParent();
         }
-        return false;
+        // Jetpack Compose 或自訂元件若無障礙節點不回報 clickable，改用座標點擊中心
+        return tapNodeBounds(node);
+    }
+
+    private boolean tapNodeBounds(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        Rect r = new Rect();
+        node.getBoundsInScreen(r);
+        if (r.width() <= 0 || r.height() <= 0) return false;
+        float x = r.exactCenterX();
+        float y = r.exactCenterY();
+        if (x <= 0 || y <= 0) return false;
+        Path path = new Path();
+        path.moveTo(x, y);
+        GestureDescription gesture = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, 80))
+                .build();
+        return dispatchGesture(gesture, null, null);
     }
 
     private void collectTexts(AccessibilityNodeInfo node, Set<String> out) {
