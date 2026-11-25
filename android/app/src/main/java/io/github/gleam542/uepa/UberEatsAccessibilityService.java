@@ -6,14 +6,23 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.graphics.Path;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -66,6 +75,11 @@ public class UberEatsAccessibilityService extends AccessibilityService {
     private long lastNavClickAt = 0;
     private boolean showedManualHint = false;
     private final Set<String> beforeTexts = new HashSet<>();
+
+    private WindowManager windowManager;
+    private View overlayView;
+    private TextView overlayText;
+    private final Runnable hideOverlayRunnable = this::removeOverlay;
 
     private static final Pattern RE_RATE_LIMIT = Pattern.compile(
             "嘗試次數過多|次數過多|太頻繁|請稍後再試|too many|try again later|rate limit",
@@ -177,6 +191,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
     @Override
     public void onDestroy() {
         stopInternal(null);
+        removeOverlay();
         if (instance == this) instance = null;
         super.onDestroy();
     }
@@ -213,9 +228,10 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         phaseStartedAt = System.currentTimeMillis();
         running = true;
 
+        handler.removeCallbacks(hideOverlayRunnable);
+        showOverlay("準備自動填入 " + queueIndices.size() + " 組優惠碼…");
         handler.removeCallbacks(ticker);
-        handler.postDelayed(ticker, 1000);
-        toast("開始在 Uber Eats App 自動填入 " + queueIndices.size() + " 組優惠碼（離開 Uber Eats 即自動停止）");
+        handler.postDelayed(ticker, 900);
         return true;
     }
 
@@ -224,7 +240,12 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         phase = Phase.IDLE;
         handler.removeCallbacks(ticker);
         if (message != null && !message.isEmpty()) {
+            setOverlayText(message);
+            handler.removeCallbacks(hideOverlayRunnable);
+            handler.postDelayed(hideOverlayRunnable, 4500);
             toast(message);
+        } else {
+            removeOverlay();
         }
     }
 
@@ -235,13 +256,10 @@ public class UberEatsAccessibilityService extends AccessibilityService {
             AccessibilityNodeInfo active = getRootInActiveWindow();
             String activePkg = active != null && active.getPackageName() != null
                     ? active.getPackageName().toString() : "null";
-            if (!showedManualHint && now - lastInTargetAt > 6000) {
-                showedManualHint = true;
-                toast("尚未讀取到 Uber Eats 畫面（目前視窗：" + activePkg + "）");
-            }
-            // 剛啟動時給 App 一點時間切換過去；若超過 20 秒不在 Uber Eats 畫面則自動停止
-            if (now - lastInTargetAt > 20000) {
-                stopInternal("已離開或無法讀取 Uber Eats 畫面，停止自動填入");
+            setOverlayText("等待 Uber Eats 畫面…（目前：" + activePkg + "）");
+            // 剛啟動時給 App 一點時間切換過去；若超過 25 秒不在 Uber Eats 畫面則自動停止
+            if (now - lastInTargetAt > 25000) {
+                stopInternal("無法讀取 Uber Eats 畫面（視窗：" + activePkg + "），已停止");
             }
             return;
         }
@@ -267,9 +285,11 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                     beforeTexts.clear();
                     collectTexts(root, beforeTexts);
                     if (fillEditText(edit, code)) {
-                        toast("(" + (queuePos + 1) + "/" + queueIndices.size() + ") 填入 " + code);
+                        setOverlayText("(" + (queuePos + 1) + "/" + queueIndices.size() + ") 已填入 " + code + "，準備領取…");
                         phase = Phase.CLICK_APPLY;
                         phaseStartedAt = now;
+                    } else {
+                        setOverlayText("找到輸入框但無法寫入文字，重試中…");
                     }
                     return;
                 }
@@ -278,13 +298,14 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                         && findNodeByLabels(root, NAV_INPUT_LABELS) == null
                         && findNodeByLabels(root, NAV_PROMO_LABELS) == null
                         && isLoginScreen(root)) {
-                    stopInternal("偵測到 Uber Eats 尚未登入，請先登入帳號後，再回「UberEat 優惠碼」點「官方App填入」");
+                    stopInternal("偵測到 Uber Eats 尚未登入，請先登入帳號後再試");
                     return;
                 }
                 // 嘗試自動導航到優惠碼輸入頁（每 1.6 秒最多操作一次，避免狂點）
                 if (now - lastNavClickAt > 1600) {
                     // 1. 首頁或活動廣告彈窗（如「最後機會 / 領取優惠」）→ 先關閉彈窗
                     if (isPromoPopup(root)) {
+                        setOverlayText("偵測到廣告彈窗，正在關閉…");
                         if (!clickByLabels(root, POPUP_CLOSE_LABELS)) {
                             performGlobalAction(GLOBAL_ACTION_BACK);
                         }
@@ -294,32 +315,40 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                     // 2. 在首頁時，只點「帳戶」（含新版左下角人像按鈕），避免誤點首頁中間的「優惠方案」餐廳篩選標籤
                     if (onHome) {
                         if (clickByLabels(root, NAV_ACCOUNT_LABELS) || clickBottomLeftAccountButton(root)) {
+                            setOverlayText("首頁：點擊左下角帳戶…");
                             lastNavClickAt = now;
                             return;
                         }
                     } else {
                         // 3. 在帳戶頁或優惠活動頁，依序點「輸入優惠序號」或「各式優惠 / 優惠活動」
-                        if (clickByLabels(root, NAV_INPUT_LABELS)
-                                || clickByLabels(root, NAV_PROMO_LABELS)
-                                || clickByLabels(root, NAV_ACCOUNT_LABELS)) {
+                        if (clickByLabels(root, NAV_INPUT_LABELS)) {
+                            setOverlayText("點擊「輸入優惠序號」…");
+                            lastNavClickAt = now;
+                            return;
+                        }
+                        if (clickByLabels(root, NAV_PROMO_LABELS)) {
+                            setOverlayText("點擊「各式優惠 / 優惠活動」…");
+                            lastNavClickAt = now;
+                            return;
+                        }
+                        if (clickByLabels(root, NAV_ACCOUNT_LABELS)) {
+                            setOverlayText("點擊「帳戶」…");
                             lastNavClickAt = now;
                             return;
                         }
                     }
                 }
-                if (!showedManualHint && now - phaseStartedAt > 7000) {
-                    showedManualHint = true;
-                    toast("請手動點「左下角人像 → 各式優惠 → 輸入優惠序號」（" + debugSummary(root) + "）");
-                }
+                setOverlayText("尋找輸入框（" + debugSummary(root) + "）");
                 break;
             }
             case CLICK_APPLY: {
                 if (now - phaseStartedAt < 450) return;
                 if (clickByLabels(root, APPLY_BUTTON_LABELS)) {
+                    setOverlayText("(" + (queuePos + 1) + "/" + queueIndices.size() + ") 已按領取優惠，等待回應…");
                     phase = Phase.WAIT_RESULT;
                     phaseStartedAt = now;
                 } else if (now - phaseStartedAt > 4000) {
-                    recordAndAdvance(item, "unknown", "找不到套用按鈕", root, now);
+                    recordAndAdvance(item, "unknown", "找不到「領取優惠 / 套用」按鈕", root, now);
                 }
                 break;
             }
@@ -404,6 +433,8 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         if (queuePos >= queueIndices.size()) {
             stopInternal("全部填完！成功 " + okCount + " 組" + (failCount > 0 ? "，失敗 " + failCount + " 組" : ""));
         } else {
+            String code = item.optString("code", "");
+            setOverlayText(code + "：" + status + (message != null && !message.isEmpty() ? "（" + message + "）" : "") + "，準備下一組…");
             phase = Phase.COOLDOWN;
             phaseStartedAt = now;
         }
@@ -548,28 +579,34 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         return null;
     }
 
+    private static boolean isUberEatsPackage(CharSequence pkg) {
+        if (pkg == null) return false;
+        String p = pkg.toString().toLowerCase(Locale.ROOT);
+        return TARGET_PACKAGE.equals(p) || p.contains("ubercab") || p.contains("ubereats");
+    }
+
     /**
-     * 先從所有視窗（getWindows）找屬於 Uber Eats 的應用程式視窗，避免鍵盤/系統覆蓋層遮住 getRootInActiveWindow()；
-     * 若找不到再退回 getRootInActiveWindow()。
+     * 從 getWindows() 與 getRootInActiveWindow() 找屬於 Uber Eats 的視窗，
+     * 避免鍵盤、廣告彈窗或自家狀態懸浮條遮住 getRootInActiveWindow()。
      */
     private AccessibilityNodeInfo findUberEatsRoot() {
-        AccessibilityNodeInfo active = getRootInActiveWindow();
-        if (active != null && active.getPackageName() != null
-                && TARGET_PACKAGE.equals(active.getPackageName().toString())) {
-            return active;
-        }
+        AccessibilityNodeInfo fallback = null;
         List<AccessibilityWindowInfo> windows = getWindows();
         if (windows != null) {
             for (AccessibilityWindowInfo w : windows) {
-                if (w == null || w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                if (w == null) continue;
                 AccessibilityNodeInfo r = w.getRoot();
-                if (r != null && r.getPackageName() != null
-                        && TARGET_PACKAGE.equals(r.getPackageName().toString())) {
-                    return r;
+                if (r != null && isUberEatsPackage(r.getPackageName())) {
+                    if (w.isFocused() || w.isActive()) return r;
+                    if (fallback == null) fallback = r;
                 }
             }
         }
-        return null;
+        AccessibilityNodeInfo active = getRootInActiveWindow();
+        if (active != null && isUberEatsPackage(active.getPackageName())) {
+            return active;
+        }
+        return fallback;
     }
 
     private String debugSummary(AccessibilityNodeInfo root) {
@@ -726,6 +763,99 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         } catch (JSONException e) {
             return 3000;
         }
+    }
+
+    private void showOverlay(String initialText) {
+        handler.post(() -> {
+            try {
+                if (windowManager == null) {
+                    windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+                }
+                if (windowManager == null) return;
+                if (overlayView != null) {
+                    if (overlayText != null) overlayText.setText(initialText);
+                    return;
+                }
+
+                LinearLayout box = new LinearLayout(this);
+                box.setOrientation(LinearLayout.HORIZONTAL);
+                box.setGravity(Gravity.CENTER_VERTICAL);
+                int padH = dp(12);
+                int padV = dp(8);
+                box.setPadding(padH, padV, padH, padV);
+
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(0xE6161616);
+                bg.setCornerRadius(dp(20));
+                box.setBackground(bg);
+
+                TextView tv = new TextView(this);
+                tv.setTextColor(Color.WHITE);
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                tv.setMaxLines(2);
+                tv.setText(initialText);
+                LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                tvLp.setMarginEnd(dp(8));
+                box.addView(tv, tvLp);
+
+                TextView stopBtn = new TextView(this);
+                stopBtn.setText("停止");
+                stopBtn.setTextColor(Color.WHITE);
+                stopBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                stopBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+                GradientDrawable btnBg = new GradientDrawable();
+                btnBg.setColor(0xFFD32F2F);
+                btnBg.setCornerRadius(dp(12));
+                stopBtn.setBackground(btnBg);
+                stopBtn.setOnClickListener(v -> stopInternal(null));
+                box.addView(stopBtn);
+
+                WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        PixelFormat.TRANSLUCENT);
+                lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                lp.y = dp(42);
+                lp.horizontalMargin = 0.04f;
+
+                windowManager.addView(box, lp);
+                overlayView = box;
+                overlayText = tv;
+            } catch (Exception ignored) {
+                // 懸浮條建立失敗不影響主流程
+            }
+        });
+    }
+
+    private void setOverlayText(String text) {
+        handler.post(() -> {
+            if (overlayText != null) {
+                overlayText.setText(text);
+            }
+        });
+    }
+
+    private void removeOverlay() {
+        handler.post(() -> {
+            if (overlayView != null && windowManager != null) {
+                try {
+                    windowManager.removeView(overlayView);
+                } catch (Exception ignored) {
+                    // ignore
+                }
+            }
+            overlayView = null;
+            overlayText = null;
+        });
+    }
+
+    private int dp(int value) {
+        return Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
     }
 
     private void toast(String msg) {
