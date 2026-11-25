@@ -74,6 +74,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
     private long phaseStartedAt = 0;
     private long lastInTargetAt = 0;
     private long lastNavClickAt = 0;
+    private int accountScrollCount = 0;
     private boolean showedManualHint = false;
     private final Set<String> beforeTexts = new HashSet<>();
 
@@ -225,6 +226,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         showedManualHint = false;
         lastInTargetAt = System.currentTimeMillis();
         lastNavClickAt = 0;
+        accountScrollCount = 0;
         phase = Phase.NAVIGATE;
         phaseStartedAt = System.currentTimeMillis();
         running = true;
@@ -320,6 +322,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                     // 2. 在首頁時，只點「帳戶」（含新版左下角人像按鈕），避免誤點首頁中間的「優惠方案」餐廳篩選標籤
                     if (onHome) {
                         if (clickByLabels(root, NAV_ACCOUNT_LABELS) || clickBottomLeftAccountButton(root)) {
+                            accountScrollCount = 0;
                             setOverlayText("首頁：點擊左下角帳戶…");
                             lastNavClickAt = now;
                             return;
@@ -327,12 +330,22 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                     } else {
                         // 3. 在帳戶頁或優惠活動頁，依序點「輸入優惠序號」或「各式優惠 / 優惠活動」
                         if (clickByLabels(root, NAV_INPUT_LABELS)) {
+                            accountScrollCount = 0;
                             setOverlayText("點擊「輸入優惠序號」…");
                             lastNavClickAt = now;
                             return;
                         }
                         if (clickByLabels(root, NAV_PROMO_LABELS)) {
+                            accountScrollCount = 0;
                             setOverlayText("點擊「各式優惠 / 優惠活動」…");
+                            lastNavClickAt = now;
+                            return;
+                        }
+                        // 4. 在帳戶頁裡若「各式優惠」還沒出現在畫面上，自動往下滑動尋找
+                        if (isAccountScreen(root) && accountScrollCount < 6) {
+                            accountScrollCount++;
+                            setOverlayText("帳戶頁：往下滑動尋找「各式優惠」（" + accountScrollCount + "/6）…");
+                            scrollDown(root);
                             lastNavClickAt = now;
                             return;
                         }
@@ -498,6 +511,62 @@ public class UberEatsAccessibilityService extends AccessibilityService {
             }
         }
         return hasSearch && hasTab;
+    }
+
+    /** 判斷目前是否在「帳戶 / 個人」頁（非首頁、非優惠活動頁，且看得到錢包 / 訂單 / 設定 / 最愛 / 協助等項目）。 */
+    private boolean isAccountScreen(AccessibilityNodeInfo root) {
+        Set<String> texts = new HashSet<>();
+        collectTexts(root, texts);
+        int hits = 0;
+        for (String t : texts) {
+            String s = t.trim().toLowerCase(Locale.ROOT);
+            if (s.equals("優惠活動") || s.equals("輸入優惠序號")) return false;
+            if (s.equals("錢包") || s.equals("訂單") || s.equals("最愛") || s.equals("協助")
+                    || s.equals("設定") || s.equals("家庭") || s.contains("uber one")
+                    || s.contains("管理帳戶") || s.contains("安全") || s.contains("商業")
+                    || s.equals("wallet") || s.equals("orders") || s.equals("favorites")
+                    || s.equals("help") || s.equals("settings") || s.equals("account")) {
+                hits++;
+            }
+        }
+        return hits >= 1;
+    }
+
+    /** 在頁面上往下滑動一屏（優先呼叫可捲動容器，不行就用手勢向上滑）。 */
+    private boolean scrollDown(AccessibilityNodeInfo root) {
+        AccessibilityNodeInfo scrollable = findScrollable(root);
+        if (scrollable != null && scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) {
+            return true;
+        }
+        Rect r = new Rect();
+        root.getBoundsInScreen(r);
+        int w = r.width();
+        int h = r.height();
+        if (w <= 0 || h <= 0) return false;
+        float x = r.left + w * 0.5f;
+        float startY = r.top + h * 0.72f;
+        float endY = r.top + h * 0.30f;
+        Path path = new Path();
+        path.moveTo(x, startY);
+        path.lineTo(x, endY);
+        GestureDescription gesture = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, 320))
+                .build();
+        return dispatchGesture(gesture, null, null);
+    }
+
+    private AccessibilityNodeInfo findScrollable(AccessibilityNodeInfo node) {
+        if (node == null || !node.isVisibleToUser()) return null;
+        if (node.isScrollable()) {
+            Rect r = new Rect();
+            node.getBoundsInScreen(r);
+            if (r.height() > 300) return node;
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo found = findScrollable(node.getChild(i));
+            if (found != null) return found;
+        }
+        return null;
     }
 
     /**
