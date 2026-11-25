@@ -44,6 +44,14 @@ describe('desktop/lib.js', () => {
     );
   });
 
+  test('Cloudflare 驗證頁偵測', () => {
+    assert.ok(lib.looksLikeCloudflareChallenge(403, ''));
+    assert.ok(lib.looksLikeCloudflareChallenge(503, ''));
+    assert.ok(lib.looksLikeCloudflareChallenge(200, '<title>Just a moment...</title>'));
+    assert.ok(lib.looksLikeCloudflareChallenge(200, '<script src="https://challenges.cloudflare.com/x"></script>'));
+    assert.ok(!lib.looksLikeCloudflareChallenge(200, '<html><body>正常文章內容</body></html>'));
+  });
+
 });
 
 const electronBinary = (() => {

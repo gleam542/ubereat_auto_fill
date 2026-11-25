@@ -60,6 +60,71 @@ ipcMain.on('uepa:set', (event, key, value) => {
   event.returnValue = true;
 });
 
+/** 當來源網站觸發 Cloudflare 瀏覽器驗證時，改用隱藏視窗載入並等待驗證完成後取出 HTML。 */
+function fetchViaHiddenWindow(url) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let pollTimer = null;
+    const fetcher = new BrowserWindow({
+      show: false,
+      width: 1024,
+      height: 768,
+      webPreferences: {
+        partition: PARTITION,
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+      },
+    });
+
+    const finish = (status, text) => {
+      if (settled) return;
+      settled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+      clearTimeout(timeout);
+      if (!fetcher.isDestroyed()) fetcher.destroy();
+      resolve({ status, text });
+    };
+
+    const timeout = setTimeout(() => finish(403, ''), 20000);
+
+    const checkJs = `(function(){
+      var t = document.title || '';
+      var h = document.documentElement ? document.documentElement.outerHTML : '';
+      var b = /just a moment|attention required|checking your browser|請稍候/i.test(t)
+        || h.indexOf('challenges.cloudflare.com') !== -1
+        || h.indexOf('__cf_chl_') !== -1
+        || h.indexOf('cf-browser-verification') !== -1;
+      return { blocked: b, html: b ? '' : h };
+    })();`;
+
+    const poll = () => {
+      if (settled || fetcher.isDestroyed()) return;
+      fetcher.webContents
+        .executeJavaScript(checkJs)
+        .then((res) => {
+          if (settled) return;
+          if (res && !res.blocked && res.html && res.html.length > 500) {
+            finish(200, res.html);
+            return;
+          }
+          pollTimer = setTimeout(poll, 1200);
+        })
+        .catch(() => {
+          if (!settled) pollTimer = setTimeout(poll, 1200);
+        });
+    };
+
+    fetcher.webContents.on('did-finish-load', () => {
+      if (settled) return;
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(poll, 800);
+    });
+    fetcher.on('closed', () => finish(403, ''));
+    fetcher.loadURL(url).catch(() => {});
+  });
+}
+
 ipcMain.on('uepa:http', async (event, url, id) => {
   const wc = event.sender;
   let status = 0;
@@ -73,6 +138,13 @@ ipcMain.on('uepa:http', async (event, url, id) => {
       text = await res.text();
     } catch (e) {
       status = 0;
+    }
+    if (status === 0 || lib.looksLikeCloudflareChallenge(status, text)) {
+      const fallback = await fetchViaHiddenWindow(url);
+      if (fallback.status === 200 && fallback.text) {
+        status = fallback.status;
+        text = fallback.text;
+      }
     }
   }
   if (wc.isDestroyed()) return;
@@ -173,6 +245,14 @@ function buildMenu() {
     {
       label: '頁面',
       submenu: [
+        {
+          label: '顯示優惠碼面板',
+          click: () => {
+            if (!win || win.isDestroyed()) return;
+            injectIfNeeded(win.webContents);
+            win.webContents.executeJavaScript('window.__uepaShowPanel&&window.__uepaShowPanel()').catch(() => {});
+          },
+        },
         { label: 'Uber Eats 首頁', accelerator: 'CmdOrCtrl+Shift+H', click: () => win.loadURL(HOME_URL) },
         { label: '打開優惠文章（手動擷取）', click: () => win.loadURL(lib.SOURCE_URL) },
         { type: 'separator' },

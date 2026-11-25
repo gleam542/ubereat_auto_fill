@@ -55,9 +55,20 @@ function browserLikeUserAgent(ua) {
   return ua.replace(/ Electron\/\S+/, '').replace(/\(KHTML, like Gecko\) .*?Chrome\//, '(KHTML, like Gecko) Chrome/');
 }
 
-/** 與 Android 版相同：同一頁只注入一次 */
+/** 與 Android 版相同：以 DOM 是否已掛載為準，避免頁面重繪或轉址洗掉面板後不再補注入 */
 function buildInjection(shim, script) {
-  return '(function(){if(window.__uepaLoaded)return;window.__uepaLoaded=true;\n' + shim + '\n' + script + '\n})();';
+  return "(function(){if(document.getElementById('uepa-host'))return;\n" + shim + '\n' + script + '\n})();';
+}
+
+function looksLikeCloudflareChallenge(status, body) {
+  if (status === 403 || status === 503) return true;
+  if (!body) return false;
+  return (
+    body.includes('challenges.cloudflare.com') ||
+    body.includes('__cf_chl_') ||
+    body.includes('cf-browser-verification') ||
+    body.includes('<title>Just a moment...</title>')
+  );
 }
 
 module.exports = {
@@ -70,4 +81,5 @@ module.exports = {
   compareVersions,
   browserLikeUserAgent,
   buildInjection,
+  looksLikeCloudflareChallenge,
 };
