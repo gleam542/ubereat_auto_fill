@@ -47,6 +47,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
     private static final String PREFS_NAME = "uepa";
     private static final String KEY_CODES = "gm:codes";
     private static final String KEY_SETTINGS = "gm:settings";
+    public static final String KEY_DEBUG_LOG = "debug_log";
 
     private static volatile UberEatsAccessibilityService instance;
     private static volatile boolean running = false;
@@ -229,6 +230,8 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         running = true;
 
         handler.removeCallbacks(hideOverlayRunnable);
+        clearDebugLog();
+        logDebug("beginRun: queue=" + queueIndices.size());
         showOverlay("準備自動填入 " + queueIndices.size() + " 組優惠碼…");
         handler.removeCallbacks(ticker);
         handler.postDelayed(ticker, 900);
@@ -240,11 +243,13 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         phase = Phase.IDLE;
         handler.removeCallbacks(ticker);
         if (message != null && !message.isEmpty()) {
+            logDebug("stop: " + message);
             setOverlayText(message);
             handler.removeCallbacks(hideOverlayRunnable);
             handler.postDelayed(hideOverlayRunnable, 4500);
             toast(message);
         } else {
+            logDebug("stop: silent");
             removeOverlay();
         }
     }
@@ -497,7 +502,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
 
     /**
      * 新版 Uber Eats 首頁左下角是一個沒有文字的圓形人像按鈕（位於底部搜尋列左側）。
-     * 當文字/無障礙描述比對不到「帳戶」時，改以畫面座標找到左下角的可點擊圖示按鈕。
+     * 依序嘗試：1) 左下角可點擊無障礙節點；2) 以底部「搜尋」列左側相對座標模擬點擊；3) 畫面左下角固定相對座標模擬點擊。
      */
     private boolean clickBottomLeftAccountButton(AccessibilityNodeInfo root) {
         Rect rootBounds = new Rect();
@@ -507,7 +512,25 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         if (width <= 0 || height <= 0) return false;
 
         AccessibilityNodeInfo best = findBottomLeftClickable(root, width, height);
-        return best != null && clickSelfOrParent(best);
+        if (best != null && clickSelfOrParent(best)) {
+            logDebug("clickBottomLeft: node");
+            return true;
+        }
+        AccessibilityNodeInfo searchNode = findNodeByLabels(root, Arrays.asList("搜尋", "search"));
+        if (searchNode != null) {
+            Rect sr = new Rect();
+            searchNode.getBoundsInScreen(sr);
+            if (sr.left > width * 0.12 && sr.bottom > height * 0.72) {
+                float x = Math.max(rootBounds.left + width * 0.11f, sr.left * 0.5f);
+                float y = sr.exactCenterY();
+                logDebug("clickBottomLeft: search-rel (" + Math.round(x) + "," + Math.round(y) + ")");
+                return tapPoint(x, y);
+            }
+        }
+        float x = rootBounds.left + width * 0.11f;
+        float y = rootBounds.bottom - height * 0.055f;
+        logDebug("clickBottomLeft: fallback (" + Math.round(x) + "," + Math.round(y) + ")");
+        return tapPoint(x, y);
     }
 
     private AccessibilityNodeInfo findBottomLeftClickable(AccessibilityNodeInfo node, int screenW, int screenH) {
@@ -693,8 +716,10 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         Rect r = new Rect();
         node.getBoundsInScreen(r);
         if (r.width() <= 0 || r.height() <= 0) return false;
-        float x = r.exactCenterX();
-        float y = r.exactCenterY();
+        return tapPoint(r.exactCenterX(), r.exactCenterY());
+    }
+
+    private boolean tapPoint(float x, float y) {
         if (x <= 0 || y <= 0) return false;
         Path path = new Path();
         path.moveTo(x, y);
@@ -825,13 +850,43 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                 windowManager.addView(box, lp);
                 overlayView = box;
                 overlayText = tv;
-            } catch (Exception ignored) {
-                // 懸浮條建立失敗不影響主流程
+                logDebug("overlay: ok");
+            } catch (Exception e) {
+                logDebug("overlay err: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             }
         });
     }
 
+    private final List<String> debugLines = new ArrayList<>();
+
+    private void clearDebugLog() {
+        synchronized (debugLines) {
+            debugLines.clear();
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_DEBUG_LOG, "").apply();
+    }
+
+    private void logDebug(String msg) {
+        String entry = String.format(Locale.ROOT, "%tT %s", System.currentTimeMillis(), msg);
+        String joined;
+        synchronized (debugLines) {
+            if (!debugLines.isEmpty() && debugLines.get(debugLines.size() - 1).endsWith(" " + msg)) {
+                return;
+            }
+            debugLines.add(entry);
+            while (debugLines.size() > 30) debugLines.remove(0);
+            StringBuilder sb = new StringBuilder();
+            for (String line : debugLines) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(line);
+            }
+            joined = sb.toString();
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_DEBUG_LOG, joined).apply();
+    }
+
     private void setOverlayText(String text) {
+        logDebug(text);
         handler.post(() -> {
             if (overlayText != null) {
                 overlayText.setText(text);

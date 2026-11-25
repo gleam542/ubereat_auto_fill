@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
     private static final int MENU_DESKTOP = 6;
     private static final int MENU_PANEL = 7;
     private static final int MENU_OFFICIAL_APP = 8;
+    private static final int MENU_DEBUG_LOG = 9;
 
     private final ExecutorService io = Executors.newCachedThreadPool();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -146,6 +147,12 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        invalidateOptionsMenu();
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         CookieManager.getInstance().flush();
@@ -194,7 +201,8 @@ public class MainActivity extends Activity {
         menu.add(Menu.NONE, MENU_RELOAD, 4, "重新整理");
         menu.add(Menu.NONE, MENU_UPDATE, 5, "檢查腳本更新");
         menu.add(Menu.NONE, MENU_DESKTOP, 6, "使用電腦版網站").setCheckable(true);
-        menu.add(Menu.NONE, MENU_ABOUT, 7, "版本資訊");
+        menu.add(Menu.NONE, MENU_DEBUG_LOG, 7, "查看執行紀錄");
+        menu.add(Menu.NONE, MENU_ABOUT, 8, "版本資訊");
         return true;
     }
 
@@ -239,6 +247,9 @@ public class MainActivity extends Activity {
                 applyUserAgent();
                 toast(desktopMode() ? "已切換為電腦版網站" : "已切換為手機版網站");
                 web.loadUrl(HOME_URL);
+                return true;
+            case MENU_DEBUG_LOG:
+                showDebugLog();
                 return true;
             case MENU_ABOUT:
                 toast("App " + appVersion() + "｜腳本 " + versionOf(currentScript()));
@@ -384,6 +395,19 @@ public class MainActivity extends Activity {
                 toast("無法開啟 Play 商店，請手動搜尋並安裝 Uber Eats");
             }
         }
+    }
+
+    private void showDebugLog() {
+        String log = prefs.getString(UberEatsAccessibilityService.KEY_DEBUG_LOG, "");
+        String msg = (log == null || log.isEmpty())
+                ? "尚無執行紀錄（請先點一次「官方App填入」）。\n無障礙連線狀態："
+                + (UberEatsAccessibilityService.isServiceConnected() ? "已連線" : "未連線")
+                : log;
+        new AlertDialog.Builder(this)
+                .setTitle("官方 App 填入執行紀錄")
+                .setMessage(msg)
+                .setPositiveButton("關閉", null)
+                .show();
     }
 
     /** 內建腳本與下載到的新版腳本，取版本較新的那一個。 */
