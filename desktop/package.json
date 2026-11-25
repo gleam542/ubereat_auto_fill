@@ -1,7 +1,7 @@
 {
   "name": "ubereat_auto_fill",
   "productName": "UberEat 優惠碼",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "把優惠文章裡的 Uber Eats 優惠碼自動填進 Uber Eats",
   "author": "gleam542",
   "license": "UNLICENSED",
