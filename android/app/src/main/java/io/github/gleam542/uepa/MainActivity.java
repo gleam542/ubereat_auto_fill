@@ -339,7 +339,12 @@ public class MainActivity extends Activity {
         Intent launch = getPackageManager().getLaunchIntentForPackage(
                 UberEatsAccessibilityService.TARGET_PACKAGE);
         if (launch == null) {
-            toast("找不到官方 Uber Eats App，請先從 Play 商店安裝");
+            new AlertDialog.Builder(this)
+                    .setTitle("尚未安裝 Uber Eats App")
+                    .setMessage("手機裡找不到官方 Uber Eats App，請先到 Play 商店下載並登入帳號後，再回來點「官方App填入」。")
+                    .setPositiveButton("前往 Play 商店下載", (d, w) -> openPlayStore(UberEatsAccessibilityService.TARGET_PACKAGE))
+                    .setNegativeButton("取消", null)
+                    .show();
             return;
         }
         if (!UberEatsAccessibilityService.isServiceConnected()) {
@@ -365,6 +370,19 @@ public class MainActivity extends Activity {
             invalidateOptionsMenu();
             launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(launch);
+        }
+    }
+
+    private void openPlayStore(String packageName) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + packageName)));
+        } catch (ActivityNotFoundException e) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=" + packageName)));
+            } catch (ActivityNotFoundException ignored) {
+                toast("無法開啟 Play 商店，請手動搜尋並安裝 Uber Eats");
+            }
         }
     }
 
