@@ -11,8 +11,11 @@ import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -24,6 +27,7 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -38,6 +42,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -68,7 +73,10 @@ public class MainActivity extends Activity {
     private static final int MENU_PANEL = 7;
 
     private final ExecutorService io = Executors.newCachedThreadPool();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private FrameLayout container;
     private WebView web;
+    private WebView activeFetcher;
     private SharedPreferences prefs;
     private String defaultUserAgent;
     private String userAgent;
@@ -79,7 +87,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("uepa", MODE_PRIVATE);
 
-        FrameLayout container = new FrameLayout(this);
+        container = new FrameLayout(this);
         web = new WebView(this);
         container.addView(web, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -142,6 +150,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null);
+        destroyFetcher();
         io.shutdownNow();
         web.destroy();
         super.onDestroy();
@@ -370,9 +380,13 @@ public class MainActivity extends Activity {
             io.execute(() -> {
                 try {
                     Fetched f = MainActivity.this.httpGet(url);
-                    deliver(id, f.status, f.body);
+                    if (looksLikeCloudflareChallenge(f.status, f.body)) {
+                        fetchViaWebView(url, id);
+                    } else {
+                        deliver(id, f.status, f.body);
+                    }
                 } catch (IOException e) {
-                    deliver(id, 0, "");
+                    fetchViaWebView(url, id);
                 }
             });
         }
@@ -382,6 +396,112 @@ public class MainActivity extends Activity {
         String js = "window.__uepaHttpCallback&&window.__uepaHttpCallback(" + id + "," + status + ","
                 + JSONObject.quote(body) + ")";
         web.post(() -> web.evaluateJavascript(js, null));
+    }
+
+    private void destroyFetcher() {
+        if (activeFetcher != null) {
+            if (container != null) container.removeView(activeFetcher);
+            activeFetcher.stopLoading();
+            activeFetcher.destroy();
+            activeFetcher = null;
+        }
+    }
+
+    /**
+     * 當來源網站有 Cloudflare 瀏覽器驗證時，改用隱藏 WebView 載入頁面並等待驗證完成後取出 HTML。
+     * 同時共用 CookieManager，驗證通過後下一次抓取就能直接沿用 cf_clearance cookie。
+     */
+    private void fetchViaWebView(String url, int id) {
+        mainHandler.post(() -> {
+            if (isFinishing() || isDestroyed()) {
+                deliver(id, 0, "");
+                return;
+            }
+            destroyFetcher();
+            final AtomicBoolean done = new AtomicBoolean(false);
+            final WebView fetcher = new WebView(this);
+            activeFetcher = fetcher;
+            fetcher.setVisibility(View.INVISIBLE);
+
+            WebSettings s = fetcher.getSettings();
+            s.setJavaScriptEnabled(true);
+            s.setDomStorageEnabled(true);
+            s.setUserAgentString(userAgent);
+
+            CookieManager cookies = CookieManager.getInstance();
+            cookies.setAcceptCookie(true);
+            cookies.setAcceptThirdPartyCookies(fetcher, true);
+
+            // 放在主 WebView 後方，不攔截觸控事件，但保留在視窗樹內讓 JS 與計時器正常運作
+            container.addView(fetcher, 0, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+            final Runnable finishTimeout = () -> {
+                if (done.compareAndSet(false, true)) {
+                    destroyFetcher();
+                    deliver(id, 403, "");
+                }
+            };
+            mainHandler.postDelayed(finishTimeout, 20000);
+
+            final Runnable[] pollRef = new Runnable[1];
+            pollRef[0] = () -> {
+                if (done.get() || activeFetcher != fetcher) return;
+                String checkJs = "(function(){"
+                        + "var t=(document.title||'');"
+                        + "var h=document.documentElement?document.documentElement.outerHTML:'';"
+                        + "var b=/just a moment|attention required|checking your browser|請稍候/i.test(t)"
+                        + "||h.indexOf('challenges.cloudflare.com')!==-1"
+                        + "||h.indexOf('__cf_chl_')!==-1"
+                        + "||h.indexOf('cf-browser-verification')!==-1;"
+                        + "return JSON.stringify({ready:document.readyState==='complete',blocked:b,html:b?'':h});"
+                        + "})();";
+                fetcher.evaluateJavascript(checkJs, raw -> {
+                    if (done.get() || activeFetcher != fetcher) return;
+                    try {
+                        if (raw != null && !raw.equals("null")) {
+                            // evaluateJavascript 回傳的是 JSON 字串再包一層引號，需要解兩次
+                            String unwrapped = new JSONObject("{\"v\":" + raw + "}").getString("v");
+                            JSONObject obj = new JSONObject(unwrapped);
+                            boolean blocked = obj.optBoolean("blocked", true);
+                            String html = obj.optString("html", "");
+                            if (!blocked && html.length() > 500) {
+                                if (done.compareAndSet(false, true)) {
+                                    mainHandler.removeCallbacks(finishTimeout);
+                                    CookieManager.getInstance().flush();
+                                    destroyFetcher();
+                                    deliver(id, 200, html);
+                                }
+                                return;
+                            }
+                        }
+                    } catch (JSONException ignored) {
+                        // 頁面尚未就緒，繼續輪詢
+                    }
+                    mainHandler.postDelayed(pollRef[0], 1200);
+                });
+            };
+
+            fetcher.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onPageFinished(WebView view, String loadedUrl) {
+                    if (!done.get() && activeFetcher == fetcher) {
+                        mainHandler.removeCallbacks(pollRef[0]);
+                        mainHandler.postDelayed(pollRef[0], 800);
+                    }
+                }
+            });
+            fetcher.loadUrl(url);
+        });
+    }
+
+    static boolean looksLikeCloudflareChallenge(int status, String body) {
+        if (status == 403 || status == 503) return true;
+        if (body == null) return false;
+        return body.contains("challenges.cloudflare.com")
+                || body.contains("__cf_chl_")
+                || body.contains("cf-browser-verification")
+                || body.contains("<title>Just a moment...</title>");
     }
 
     /* ------------------------------------------------------------------ */
@@ -406,6 +526,10 @@ public class MainActivity extends Activity {
             c.setInstanceFollowRedirects(true);
             c.setRequestProperty("User-Agent", userAgent);
             c.setRequestProperty("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8");
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null && !cookie.isEmpty()) {
+                c.setRequestProperty("Cookie", cookie);
+            }
             int status = c.getResponseCode();
             InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
             String body = in == null ? "" : readAll(in);
