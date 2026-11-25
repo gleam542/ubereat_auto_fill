@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UberEats 優惠碼自動填入
 // @namespace    https://github.com/gleam542/ubereat_auto_fill
-// @version      1.4.1
+// @version      1.4.2
 // @description  從 callingtaiwan.com.tw 的 Uber Eats 優惠文章抓出所有優惠碼，並逐一自動填入 ubereats.com 的優惠碼欄位
 // @homepageURL  https://github.com/gleam542/ubereat_auto_fill
 // @updateURL    https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js
@@ -457,7 +457,7 @@
   const RATE_RE = /(太多次|次數過多|過於頻繁|稍後再試|請稍後|too many|try again later|rate limit|temporarily)/i;
   const ALREADY_RE = /(已使用過|已兌換過|已經新增|已新增過|已套用過|已經套用|已領取過|already)/i;
   const FAIL_RE =
-    /(無效|錯誤|過期|已結束|不符合|不適用|不可用|無法|失敗|不存在|找不到|僅限|invalid|expired|not valid|isn't valid|is not valid|not eligible|ineligible|unable|error|couldn't|could not|can't|cannot|not found|doesn't exist|does not exist|only for|not available)/i;
+    /(無效|錯誤|過期|已結束|已失效|不符合|不適用|不可用|無法|失敗|不存在|找不到|僅限|僅適用|已達上限|達到.*上限|兌換次數上限|次數上限|已額滿|已兌換完畢|已全數兌換|領取完畢|已搶完|尚未開始|尚未開放|invalid|expired|not valid|isn't valid|is not valid|not eligible|ineligible|unable|error|couldn't|could not|can't|cannot|not found|doesn't exist|does not exist|only for|not available|redemption limit|reached.*limit)/i;
   const SUCCESS_RE = /(已套用|已新增|已加入|已兌換|套用成功|新增成功|兌換成功|成功|applied|added|success|redeemed|saved|you've got|you got|enjoy)/i;
   const RELEVANT_SEL =
     '[role="alert"],[role="status"],[aria-live],[data-baseweb="toast"],[data-baseweb="notification"],[data-baseweb="snackbar-element"],[data-baseweb="form-control-caption"]';

@@ -99,7 +99,7 @@ public class UberEatsAccessibilityService extends AccessibilityService {
             "已套用|已新增|新增成功|已加入|套用成功|兌換成功|優惠已新增|promo(?:tion)? (?:applied|added)|successfully (?:applied|added)",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern RE_FAIL = Pattern.compile(
-            "無效|過期|不符合|無法使用|無法套用|找不到|錯誤|不適用|僅限|不符資格|已達上限|已額滿|無此優惠|序號有誤|代碼無效|invalid|expired|not eligible|unable to apply|cannot be applied|couldn't apply|not valid|oops|sorry",
+            "無效|過期|不符合|無法使用|無法套用|無法兌換|找不到|錯誤|不適用|僅限|僅適用|不符資格|不符合資格|已達上限|已達到.*上限|達到.*上限|兌換次數上限|次數上限|已額滿|已兌換完畢|已全數兌換|領取完畢|已搶完|已失效|已結束|尚未開始|尚未開放|無此優惠|序號有誤|代碼無效|invalid|expired|not eligible|unable to apply|cannot be applied|couldn't apply|not valid|redemption limit|reached.*limit|oops|sorry",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern RE_LOGIN_SCREEN = Pattern.compile(
             "輸入手機號碼|手機號碼或電子郵件|使用\\s*Google\\s*(?:帳戶)?繼續|使用\\s*Apple\\s*繼續|使用\\s*Facebook\\s*繼續|登入或註冊|建立帳戶|請先登入|enter your (?:mobile|phone) number|continue with google|continue with apple|sign in or sign up|log in or sign up",
@@ -474,8 +474,8 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         }
 
         unknownStreak = "unknown".equals(status) ? unknownStreak + 1 : 0;
-        if (unknownStreak >= 3) {
-            stopInternal("連續 3 組無法判斷結果，已停止（請確認是否在優惠碼輸入畫面）");
+        if (unknownStreak >= 5) {
+            stopInternal("連續 5 組無法判斷結果，已停止（請確認是否在優惠碼輸入畫面）");
             return;
         }
 
