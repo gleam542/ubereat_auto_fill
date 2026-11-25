@@ -75,6 +75,12 @@ public class UberEatsAccessibilityService extends AccessibilityService {
     private static final Pattern RE_FAIL = Pattern.compile(
             "無效|過期|不符合|無法使用|無法套用|找不到|錯誤|不適用|僅限|不符資格|已達上限|已額滿|無此優惠|序號有誤|代碼無效|invalid|expired|not eligible|unable to apply|cannot be applied|couldn't apply|not valid|oops|sorry",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern RE_LOGIN_SCREEN = Pattern.compile(
+            "輸入手機號碼|手機號碼或電子郵件|使用\\s*Google\\s*(?:帳戶)?繼續|使用\\s*Apple\\s*繼續|使用\\s*Facebook\\s*繼續|登入或註冊|建立帳戶|請先登入|enter your (?:mobile|phone) number|continue with google|continue with apple|sign in or sign up|log in or sign up",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern RE_LOGIN_WELCOME = Pattern.compile(
+            "^(?:開始使用|登入|註冊|get started|sign in|log in)$",
+            Pattern.CASE_INSENSITIVE);
 
     private static final List<String> NAV_INPUT_LABELS = Arrays.asList(
             "輸入優惠序號", "新增優惠碼", "新增優惠", "輸入優惠碼", "新增促銷代碼",
@@ -254,6 +260,13 @@ public class UberEatsAccessibilityService extends AccessibilityService {
                     }
                     return;
                 }
+                // 偵測是否停在登入 / 註冊頁（確認畫面上沒有優惠入口時才判定，避免誤判）
+                if (findNodeByLabels(root, NAV_INPUT_LABELS) == null
+                        && findNodeByLabels(root, NAV_PROMO_LABELS) == null
+                        && isLoginScreen(root)) {
+                    stopInternal("偵測到 Uber Eats 尚未登入，請先登入帳號後，再回「UberEat 優惠碼」點「官方App填入」");
+                    return;
+                }
                 // 嘗試自動導航到優惠碼輸入頁（每 1.8 秒最多點一次，避免狂點）
                 if (now - lastNavClickAt > 1800) {
                     if (clickByLabels(root, NAV_INPUT_LABELS)
@@ -372,6 +385,18 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         if (RE_SUCCESS.matcher(text).find()) return "success";
         if (RE_FAIL.matcher(text).find()) return "fail";
         return null;
+    }
+
+    private boolean isLoginScreen(AccessibilityNodeInfo root) {
+        Set<String> texts = new HashSet<>();
+        collectTexts(root, texts);
+        int welcomeHits = 0;
+        for (String t : texts) {
+            if (RE_LOGIN_SCREEN.matcher(t).find()) return true;
+            if (RE_LOGIN_WELCOME.matcher(t.trim()).matches()) welcomeHits++;
+        }
+        // 歡迎頁沒有底部「帳戶」分頁，但有「開始使用 / 登入 / 註冊」按鈕時也視為未登入
+        return welcomeHits > 0 && findNodeByLabels(root, NAV_ACCOUNT_LABELS) == null;
     }
 
     private boolean fillEditText(AccessibilityNodeInfo edit, String code) {
