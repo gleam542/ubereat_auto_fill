@@ -115,7 +115,8 @@ public class UberEatsAccessibilityService extends AccessibilityService {
             "各式優惠", "優惠活動", "優惠方案", "優惠與獎勵", "優惠代碼", "促銷活動", "促銷",
             "promotions", "offers", "promos");
     private static final List<String> NAV_ACCOUNT_LABELS = Arrays.asList(
-            "帳戶", "帳號", "個人檔案", "account", "profile");
+            "「帳戶」", "「帳號」", "帳戶", "帳號", "個人檔案", "分頁 (第 1", "分頁（第 1",
+            "account", "profile", "tab 1 of");
     private static final List<String> APPLY_BUTTON_LABELS = Arrays.asList(
             "領取優惠", "新增優惠", "套用", "新增", "使用", "兌換",
             "apply", "add promo", "add");
@@ -527,21 +528,24 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         return hasClaim && !hasPromoPageTitle;
     }
 
-    /** 判斷目前是否在 Uber Eats 主頁（底部有搜尋列、上方有外送 / 自取 / 行程等分頁）。 */
+    /** 判斷目前是否在 Uber Eats 主頁（底部有搜尋/購物車分頁列、上方有外送 / 自取 / 生鮮雜貨等）。 */
     private boolean isHomeScreen(AccessibilityNodeInfo root) {
         Set<String> texts = new HashSet<>();
         collectTexts(root, texts);
-        boolean hasSearch = false;
-        boolean hasTab = false;
+        boolean hasBottomBar = false;
+        boolean hasHomeFeed = false;
         for (String t : texts) {
             String s = t.trim().toLowerCase(Locale.ROOT);
-            if (s.equals("搜尋") || s.equals("search") || s.contains("搜尋 uber")) hasSearch = true;
+            if (s.contains("搜尋") || s.contains("購物車") || s.contains("分頁 (第") || s.contains("分頁（第")
+                    || s.equals("search") || s.contains("search tab")) {
+                hasBottomBar = true;
+            }
             if (s.equals("外送") || s.equals("自取") || s.equals("行程") || s.equals("優快送")
-                    || s.equals("delivery") || s.equals("pickup")) {
-                hasTab = true;
+                    || s.equals("生鮮雜貨") || s.equals("delivery") || s.equals("pickup")) {
+                hasHomeFeed = true;
             }
         }
-        return hasSearch && hasTab;
+        return hasBottomBar && hasHomeFeed;
     }
 
     /** 判斷目前是否在「帳戶 / 個人」頁（非首頁、非優惠活動頁，且看得到錢包 / 訂單 / 設定 / 最愛 / 協助等項目）。 */
@@ -792,7 +796,9 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         if (!label.isEmpty()) {
             for (String want : labels) {
                 String w = want.toLowerCase(Locale.ROOT);
-                if (label.equals(w) || (label.length() <= w.length() + 6 && label.contains(w))) {
+                boolean isTabDesc = label.contains("分頁") || label.contains("tab ");
+                int slack = isTabDesc ? 20 : 6;
+                if (label.equals(w) || (label.length() <= w.length() + slack && label.contains(w))) {
                     // 避免點到輸入框本身
                     CharSequence cls = node.getClassName();
                     if (!node.isEditable() && (cls == null || !cls.toString().contains("EditText"))) {
