@@ -1,6 +1,7 @@
 package io.github.gleam542.uepa;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -13,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -71,6 +73,7 @@ public class MainActivity extends Activity {
     private static final int MENU_ABOUT = 5;
     private static final int MENU_DESKTOP = 6;
     private static final int MENU_PANEL = 7;
+    private static final int MENU_OFFICIAL_APP = 8;
 
     private final ExecutorService io = Executors.newCachedThreadPool();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -182,14 +185,16 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(Menu.NONE, MENU_PANEL, 0, "優惠碼面板")
+        menu.add(Menu.NONE, MENU_OFFICIAL_APP, 0, "官方App填入")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
-        menu.add(Menu.NONE, MENU_HOME, 1, "Uber Eats 首頁");
-        menu.add(Menu.NONE, MENU_SOURCE, 2, "打開優惠文章（手動擷取）");
-        menu.add(Menu.NONE, MENU_RELOAD, 3, "重新整理");
-        menu.add(Menu.NONE, MENU_UPDATE, 4, "檢查腳本更新");
-        menu.add(Menu.NONE, MENU_DESKTOP, 5, "使用電腦版網站").setCheckable(true);
-        menu.add(Menu.NONE, MENU_ABOUT, 6, "版本資訊");
+        menu.add(Menu.NONE, MENU_PANEL, 1, "優惠碼面板")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+        menu.add(Menu.NONE, MENU_HOME, 2, "Uber Eats 首頁");
+        menu.add(Menu.NONE, MENU_SOURCE, 3, "打開優惠文章（手動擷取）");
+        menu.add(Menu.NONE, MENU_RELOAD, 4, "重新整理");
+        menu.add(Menu.NONE, MENU_UPDATE, 5, "檢查腳本更新");
+        menu.add(Menu.NONE, MENU_DESKTOP, 6, "使用電腦版網站").setCheckable(true);
+        menu.add(Menu.NONE, MENU_ABOUT, 7, "版本資訊");
         return true;
     }
 
@@ -197,12 +202,19 @@ public class MainActivity extends Activity {
     public boolean onPrepareOptionsMenu(Menu menu) {
         MenuItem desktop = menu.findItem(MENU_DESKTOP);
         if (desktop != null) desktop.setChecked(desktopMode());
+        MenuItem official = menu.findItem(MENU_OFFICIAL_APP);
+        if (official != null) {
+            official.setTitle(UberEatsAccessibilityService.isRunning() ? "停止填入" : "官方App填入");
+        }
         return super.onPrepareOptionsMenu(menu);
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
+            case MENU_OFFICIAL_APP:
+                launchOfficialAppFlow();
+                return true;
             case MENU_PANEL:
                 if (isScriptHost(currentHost)) {
                     showPanel();
@@ -305,6 +317,55 @@ public class MainActivity extends Activity {
         web.evaluateJavascript(
                 "(function(){if(window.__uepaShowPanel)window.__uepaShowPanel();})();",
                 null);
+    }
+
+    private void launchOfficialAppFlow() {
+        if (UberEatsAccessibilityService.isRunning()) {
+            UberEatsAccessibilityService.stopRun();
+            invalidateOptionsMenu();
+            return;
+        }
+        int pending = UberEatsAccessibilityService.countPendingCodes(this);
+        if (pending <= 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle("還沒有待填入的優惠碼")
+                    .setMessage("請先點「優惠碼面板」按「① 抓取優惠碼」（或從選單打開優惠文章手動擷取），抓完再點「官方App填入」。")
+                    .setPositiveButton("打開優惠碼面板", (d, w) -> showPanel())
+                    .setNeutralButton("打開優惠文章", (d, w) -> web.loadUrl(SOURCE_URL))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        Intent launch = getPackageManager().getLaunchIntentForPackage(
+                UberEatsAccessibilityService.TARGET_PACKAGE);
+        if (launch == null) {
+            toast("找不到官方 Uber Eats App，請先從 Play 商店安裝");
+            return;
+        }
+        if (!UberEatsAccessibilityService.isServiceConnected()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("需要開啟無障礙權限")
+                    .setMessage("為了直接操作您已登入的官方 Uber Eats App，請先開啟「UberEat 優惠碼」的無障礙服務。\n\n"
+                            + "步驟：\n"
+                            + "1. 點「前往無障礙設定」\n"
+                            + "2. 找到「已下載的應用程式」→「UberEat 優惠碼」並開啟\n"
+                            + "3. 回到這裡再按一次「官方App填入」\n\n"
+                            + "※ 若 Android 13 以上顯示「受限制的設定」無法開啟：\n"
+                            + "請先點「應用程式資訊」→ 右上角 ⋮ →「允許受限制的設定」，再到無障礙開啟。")
+                    .setPositiveButton("前往無障礙設定", (d, w) ->
+                            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    .setNeutralButton("應用程式資訊", (d, w) ->
+                            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", getPackageName(), null))))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        if (UberEatsAccessibilityService.startRun(this)) {
+            invalidateOptionsMenu();
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(launch);
+        }
     }
 
     /** 內建腳本與下載到的新版腳本，取版本較新的那一個。 */

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">UberEat 優惠碼</string>
+    <string name="accessibility_service_description">僅在您手動啟動「官方 App 填入」時，自動在 Uber Eats App 中輸入已抓取的優惠碼並記錄結果。</string>
 </resources>
