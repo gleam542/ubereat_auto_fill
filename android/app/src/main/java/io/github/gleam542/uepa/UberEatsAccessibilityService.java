@@ -1,6 +1,7 @@
 package io.github.gleam542.uepa;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.accessibilityservice.GestureDescription;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -82,6 +83,11 @@ public class UberEatsAccessibilityService extends AccessibilityService {
     private View overlayView;
     private TextView overlayText;
     private final Runnable hideOverlayRunnable = this::removeOverlay;
+
+    private volatile AccessibilityNodeInfo lastEventRoot;
+    private volatile long lastEventAt = 0;
+    private volatile String lastEventPkg = "";
+    private volatile boolean lastEventHadSource = false;
 
     private static final Pattern RE_RATE_LIMIT = Pattern.compile(
             "嘗試次數過多|次數過多|太頻繁|請稍後再試|too many|try again later|rate limit",
@@ -182,7 +188,22 @@ public class UberEatsAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // 主迴圈由 ticker 定時檢查目前畫面狀態，避免遺漏動畫後的 DOM 變化
+        if (!running || event == null) return;
+        CharSequence pkg = event.getPackageName();
+        if (pkg != null) lastEventPkg = pkg.toString();
+        if (!isUberEatsPackage(pkg)) return;
+        AccessibilityNodeInfo src = event.getSource();
+        lastEventHadSource = (src != null);
+        if (src != null) {
+            AccessibilityNodeInfo top = src;
+            for (int depth = 0; depth < 32; depth++) {
+                AccessibilityNodeInfo p = top.getParent();
+                if (p == null) break;
+                top = p;
+            }
+            lastEventRoot = top;
+            lastEventAt = System.currentTimeMillis();
+        }
     }
 
     @Override
@@ -233,7 +254,13 @@ public class UberEatsAccessibilityService extends AccessibilityService {
 
         handler.removeCallbacks(hideOverlayRunnable);
         clearDebugLog();
-        logDebug("beginRun: queue=" + queueIndices.size());
+        lastEventRoot = null;
+        lastEventAt = 0;
+        lastEventPkg = "";
+        lastEventHadSource = false;
+        AccessibilityServiceInfo info = getServiceInfo();
+        int caps = info != null ? info.getCapabilities() : -1;
+        logDebug("beginRun: queue=" + queueIndices.size() + " caps=" + caps);
         showOverlay("準備自動填入 " + queueIndices.size() + " 組優惠碼…");
         handler.removeCallbacks(ticker);
         handler.postDelayed(ticker, 900);
@@ -263,10 +290,14 @@ public class UberEatsAccessibilityService extends AccessibilityService {
             AccessibilityNodeInfo active = getRootInActiveWindow();
             String activePkg = active != null && active.getPackageName() != null
                     ? active.getPackageName().toString() : "null";
-            setOverlayText("等待 Uber Eats 畫面…（目前：" + activePkg + "）");
+            List<AccessibilityWindowInfo> ws = getWindows();
+            int winCount = ws == null ? -1 : ws.size();
+            setOverlayText("等待 Uber Eats（act=" + activePkg + " w=" + winCount
+                    + " ev=" + lastEventPkg + "/" + lastEventHadSource + "）");
             // 剛啟動時給 App 一點時間切換過去；若超過 25 秒不在 Uber Eats 畫面則自動停止
             if (now - lastInTargetAt > 25000) {
-                stopInternal("無法讀取 Uber Eats 畫面（視窗：" + activePkg + "），已停止");
+                stopInternal("無法讀取 Uber Eats 畫面（act=" + activePkg + " w=" + winCount
+                        + " ev=" + lastEventPkg + "），已停止");
             }
             return;
         }
@@ -698,7 +729,18 @@ public class UberEatsAccessibilityService extends AccessibilityService {
         if (active != null && isUberEatsPackage(active.getPackageName())) {
             return active;
         }
-        return fallback;
+        if (fallback != null) return fallback;
+        // 備援：部分手機 getRootInActiveWindow()/getWindows() 會回傳 null，但 onAccessibilityEvent 的 source 仍有節點樹
+        AccessibilityNodeInfo ev = lastEventRoot;
+        if (ev != null && System.currentTimeMillis() - lastEventAt < 10000) {
+            try {
+                ev.refresh();
+                if (isUberEatsPackage(ev.getPackageName())) return ev;
+            } catch (Exception ignored) {
+                // 節點已失效
+            }
+        }
+        return null;
     }
 
     private String debugSummary(AccessibilityNodeInfo root) {
