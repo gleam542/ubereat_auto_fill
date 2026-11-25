@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UberEats 優惠碼自動填入
 // @namespace    https://github.com/gleam542/ubereat_auto_fill
-// @version      1.4.0
+// @version      1.4.1
 // @description  從 callingtaiwan.com.tw 的 Uber Eats 優惠文章抓出所有優惠碼，並逐一自動填入 ubereats.com 的優惠碼欄位
 // @homepageURL  https://github.com/gleam542/ubereat_auto_fill
 // @updateURL    https://raw.githubusercontent.com/gleam542/ubereat_auto_fill/HEAD/ubereats-promo-autofill.user.js
@@ -777,6 +777,18 @@
     }
   `;
 
+  let ttPolicy = null;
+  function setHtml(el, html) {
+    if (!ttPolicy && typeof window.trustedTypes !== 'undefined' && window.trustedTypes && typeof window.trustedTypes.createPolicy === 'function') {
+      try {
+        ttPolicy = window.trustedTypes.createPolicy('uepa-html', { createHTML: (s) => s });
+      } catch (e) {
+        ttPolicy = window.trustedTypes.defaultPolicy || null;
+      }
+    }
+    el.innerHTML = ttPolicy && typeof ttPolicy.createHTML === 'function' ? ttPolicy.createHTML(html) : html;
+  }
+
   function createShadowHost() {
     const existing = document.getElementById('uepa-host');
     if (existing) existing.remove();
@@ -805,7 +817,7 @@
   function mountUberPanel() {
     loadState();
     const { host, root } = createShadowHost();
-    root.innerHTML = `
+    setHtml(root, `
       <style>${CSS}</style>
       <div class="panel ${state.settings.minimized ? 'min' : ''}">
         <header><b>Uber Eats 優惠碼自動填入</b><span class="count"></span><span class="mini"></span><button data-act="min" title="縮小/展開">–</button></header>
@@ -828,7 +840,7 @@
             <div class="row"><span>自動找不到欄位時：</span><button data-act="teach-input">指定輸入框</button><button data-act="teach-button">指定套用按鈕</button><button data-act="untaught">清除指定</button></div>
           </details>
         </div>
-      </div>`;
+      </div>`);
 
     const $ = (sel) => root.querySelector(sel);
     const panel = $('.panel');
@@ -851,7 +863,7 @@
 
     function render() {
       const list = $('.list');
-      list.innerHTML = state.codes
+      setHtml(list, state.codes
         .map((c, i) => {
           const tags = [];
           if (c.expired) tags.push(`<span class="tag warn">已過期${c.expiry ? ' ' + escapeHtml(c.expiry) : ''}</span>`);
@@ -865,7 +877,7 @@
             ${c.context ? `<span class="ctx" title="${escapeHtml(c.context)}">${escapeHtml(c.context.slice(0, 90))}${c.context.length > 90 ? '…' : ''}</span>` : ''}
           </label>`;
         })
-        .join('');
+        .join(''));
       const n = (s) => state.codes.filter((c) => c.status === s).length;
       const selected = state.codes.filter((c) => c.checked).length;
       $('.count').textContent = state.codes.length ? `已選 ${selected}/${state.codes.length}` : '';
@@ -1081,6 +1093,16 @@
       if (document.visibilityState === 'visible') syncFromStore();
     });
 
+    window.__uepaShowPanel = () => {
+      if (!document.getElementById('uepa-host')) {
+        mountUberPanel();
+        return;
+      }
+      state.settings.minimized = false;
+      panel.classList.remove('min');
+      saveSettings();
+    };
+
     setStatus(
       state.codes.length
         ? '已載入上次的優惠碼清單。按「② 開始填入」，或先「① 抓取優惠碼」更新。'
@@ -1093,7 +1115,7 @@
     const path = decodeURIComponent(location.pathname).toLowerCase();
     if (!/uber\s*eats|ubereats/i.test(path + ' ' + document.title)) return;
     const { root } = createShadowHost();
-    root.innerHTML = `
+    setHtml(root, `
       <style>${CSS} .panel { width: 300px; }</style>
       <div class="panel">
         <header><b>Uber Eats 優惠碼自動填入</b></header>
@@ -1102,23 +1124,26 @@
           <div class="status">按下按鈕後，優惠碼會存起來，再到 ubereats.com 開始填入。</div>
           <div class="list"></div>
         </div>
-      </div>`;
+      </div>`);
     root.querySelector('[data-act=grab]').addEventListener('click', async () => {
       await store.refresh();
       const found = extractCodes(document, { now: Date.now() });
       const { codes, added } = mergeCodes(store.get('codes', []), found);
       store.set('codes', codes);
       const status = root.querySelector('.status');
-      status.innerHTML = `擷取到 ${found.length} 組（新增 ${added} 組）。<br><a href="${UBER_EATS_HOME}" target="_blank" rel="noopener">前往 Uber Eats 開始填入 →</a>`;
-      root.querySelector('.list').innerHTML = found
+      setHtml(status, `擷取到 ${found.length} 組（新增 ${added} 組）。<br><a href="${UBER_EATS_HOME}" target="_blank" rel="noopener">前往 Uber Eats 開始填入 →</a>`);
+      setHtml(root.querySelector('.list'), found
         .map(
           (c) =>
             `<div class="item ${c.expired ? 'expired' : ''}"><span></span><code>${escapeHtml(c.code)}</code><span class="badge">${
               c.expired ? '已過期' : c.confidence === 'low' ? '待確認' : '可用'
             }</span></div>`
         )
-        .join('');
+        .join(''));
     });
+    window.__uepaShowPanel = () => {
+      if (!document.getElementById('uepa-host')) mountSourcePanel();
+    };
   }
 
   async function main() {
@@ -1149,5 +1174,10 @@
     /* ignore */
   }
 
-  main().catch((e) => console.error("[UberEats 優惠碼]", e));
+  main().catch((e) => {
+    console.error("[UberEats 優惠碼]", e);
+    if (typeof UepaBridge !== 'undefined' && UepaBridge && typeof UepaBridge.onError === 'function') {
+      UepaBridge.onError(String(e));
+    }
+  });
 })();

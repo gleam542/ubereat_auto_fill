@@ -7,10 +7,13 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Insets;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.WindowInsets;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
@@ -18,6 +21,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import org.json.JSONObject;
@@ -61,6 +65,7 @@ public class MainActivity extends Activity {
     private static final int MENU_UPDATE = 4;
     private static final int MENU_ABOUT = 5;
     private static final int MENU_DESKTOP = 6;
+    private static final int MENU_PANEL = 7;
 
     private final ExecutorService io = Executors.newCachedThreadPool();
     private WebView web;
@@ -74,14 +79,38 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("uepa", MODE_PRIVATE);
 
+        FrameLayout container = new FrameLayout(this);
         web = new WebView(this);
-        setContentView(web);
+        container.addView(web, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        container.setOnApplyWindowInsetsListener((v, insets) -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+                v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            } else {
+                @SuppressWarnings("deprecation")
+                int left = insets.getSystemWindowInsetLeft();
+                @SuppressWarnings("deprecation")
+                int top = insets.getSystemWindowInsetTop();
+                @SuppressWarnings("deprecation")
+                int right = insets.getSystemWindowInsetRight();
+                @SuppressWarnings("deprecation")
+                int bottom = insets.getSystemWindowInsetBottom();
+                v.setPadding(left, top, right, bottom);
+            }
+            return insets;
+        });
+        setContentView(container);
 
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+        settings.setSupportZoom(true);
         settings.setBuiltInZoomControls(true); // 可以雙指縮放
         settings.setDisplayZoomControls(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
         defaultUserAgent = settings.getUserAgentString();
         applyUserAgent();
 
@@ -143,12 +172,14 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(Menu.NONE, MENU_HOME, 0, "Uber Eats 首頁");
-        menu.add(Menu.NONE, MENU_SOURCE, 1, "打開優惠文章（手動擷取）");
-        menu.add(Menu.NONE, MENU_RELOAD, 2, "重新整理");
-        menu.add(Menu.NONE, MENU_UPDATE, 3, "檢查腳本更新");
-        menu.add(Menu.NONE, MENU_DESKTOP, 4, "使用電腦版網站").setCheckable(true);
-        menu.add(Menu.NONE, MENU_ABOUT, 5, "版本資訊");
+        menu.add(Menu.NONE, MENU_PANEL, 0, "優惠碼面板")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
+        menu.add(Menu.NONE, MENU_HOME, 1, "Uber Eats 首頁");
+        menu.add(Menu.NONE, MENU_SOURCE, 2, "打開優惠文章（手動擷取）");
+        menu.add(Menu.NONE, MENU_RELOAD, 3, "重新整理");
+        menu.add(Menu.NONE, MENU_UPDATE, 4, "檢查腳本更新");
+        menu.add(Menu.NONE, MENU_DESKTOP, 5, "使用電腦版網站").setCheckable(true);
+        menu.add(Menu.NONE, MENU_ABOUT, 6, "版本資訊");
         return true;
     }
 
@@ -162,6 +193,13 @@ public class MainActivity extends Activity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
+            case MENU_PANEL:
+                if (isScriptHost(currentHost)) {
+                    showPanel();
+                } else {
+                    toast("請先回到 Uber Eats 首頁再開啟優惠碼面板");
+                }
+                return true;
             case MENU_HOME:
                 web.loadUrl(HOME_URL);
                 return true;
@@ -244,10 +282,19 @@ public class MainActivity extends Activity {
             toast("找不到內建腳本");
             return;
         }
-        // 同一頁只注入一次（onPageFinished 可能觸發多次）
-        String js = "(function(){if(window.__uepaLoaded)return;window.__uepaLoaded=true;\n"
-                + shim + "\n" + script + "\n})();";
+        // 以實際 DOM 是否已掛載為準：若 SPA 重繪或驗證轉址清掉面板，仍可自動補注入
+        String js = "(function(){if(document.getElementById('uepa-host'))return;"
+                + "try{\n" + shim + "\n" + script
+                + "\n}catch(e){if(window.UepaBridge&&UepaBridge.onError)UepaBridge.onError(String(e));}"
+                + "})();";
         web.evaluateJavascript(js, null);
+    }
+
+    private void showPanel() {
+        inject();
+        web.evaluateJavascript(
+                "(function(){if(window.__uepaShowPanel)window.__uepaShowPanel();})();",
+                null);
     }
 
     /** 內建腳本與下載到的新版腳本，取版本較新的那一個。 */
@@ -305,6 +352,12 @@ public class MainActivity extends Activity {
         public void setValue(String key, String value) {
             if (!isScriptHost(currentHost)) return;
             prefs.edit().putString("gm:" + key, value).apply();
+        }
+
+        @JavascriptInterface
+        public void onError(String message) {
+            if (!isScriptHost(currentHost)) return;
+            runOnUiThread(() -> toast("腳本錯誤：" + message));
         }
 
         /** 只允許抓優惠文章的網站（對應 userscript 的 @connect）。 */
